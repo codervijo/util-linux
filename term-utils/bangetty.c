@@ -181,7 +181,7 @@ FILE *dbf;
 #include <unistd.h>
 #include <ctype.h>
 
-#define NUM_FIELDS                                      3
+#define NUM_FIELDS                                      0
 #define NUM_ITEMS                                       3
 
 #define USER_ROW                                        9
@@ -217,9 +217,7 @@ FILE *dbf;
 #define CANCEL_TEXT                              "Cancel"
 
 typedef struct login_ui_s {
-    int      numfields;
     int      numitems;
-    FIELD  **field;
     FORM    *iform;
     ITEM   **itms;
     MENU    *menu;
@@ -231,7 +229,7 @@ typedef struct login_ui_s {
 login_ui_t *setup_login_screen(void);
 static char *trim_input(char *input);
 int button_handle(login_ui_t *lui, ITEM *item);
-void run_login_loop(login_ui_t *lui);
+void run_ui_loop(login_ui_t *lui);
 int teardown_login_screen(login_ui_t *lui);
 void login_now(int argc, char **argv);
 
@@ -252,7 +250,6 @@ login_ui_t *setup_login_screen(void)
     init_pair(2, COLOR_WHITE, COLOR_BLUE);
 
     lui   = malloc(sizeof(login_ui_t));
-    lui->numfields = NUM_FIELDS;
     lui->numitems  = NUM_ITEMS;
     lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
     assert(lui->bodywin != NULL);
@@ -264,32 +261,6 @@ login_ui_t *setup_login_screen(void)
     assert(lui->menuwin != NULL);
     //box(lui->menuwin, 0, 0);
     //lui->menuwin = newwin(2, 12, MENU_ROW, 30);
-    lui->field = malloc(lui->numfields*sizeof(FIELD));
-    assert(lui->field != NULL);
-    /* Initialize the fields */
-    //refresh();
-    lui->field[0] = new_field(DEFAULT_FIELD_HEIGHT, INPUT_SIZE, USER_ROW, START_INPUT_COL, 0, 0);
-    lui->field[1] = new_field(DEFAULT_FIELD_HEIGHT, INPUT_SIZE, PSWD_ROW, START_INPUT_COL, 0, 0);
-    lui->field[2] = NULL;
-    for (int i = 0; i < lui->numfields-1; i++)
-        assert(lui->field[i] != NULL);
-
-    /* Set field options */
-    set_field_buffer(lui->field[0], 0, "uin");
-    set_field_buffer(lui->field[1], 1, "pin");
-
-    set_field_fore(lui->field[0], COLOR_PAIR(1));
-    set_field_back(lui->field[1], COLOR_PAIR(2));
-
-    set_field_opts(lui->field[0], O_VISIBLE | O_PUBLIC | O_EDIT | O_ACTIVE);
-    set_field_opts(lui->field[1], O_VISIBLE | O_PUBLIC | O_EDIT | O_ACTIVE);
-
-    set_field_back(lui->field[0], A_UNDERLINE);
-    set_field_back(lui->field[1], A_UNDERLINE);
-
-    /* Create the form and post it */
-    lui->iform = new_form(lui->field);
-    assert(lui->iform != NULL);
     set_form_win(lui->iform, lui->formwin);
     //tmpw1 = derwin(lui->formwin, 10, 40, USER_ROW-1, START_TEXT_COL-2);
     //box(tmpw1, 0, 0);
@@ -316,10 +287,8 @@ login_ui_t *setup_login_screen(void)
     set_menu_format(lui->menu, 1, 20);
     set_menu_mark(lui->menu, "");
 
-    //set_current_field (lui->iform, lui->field[1]);
     //form_driver (lui->iform, REQ_CLR_FIELD);
 
-    set_current_field (lui->iform, lui->field[0]);
     form_driver (lui->iform, REQ_CLR_FIELD);
 
     post_menu(lui->menu);
@@ -358,24 +327,11 @@ int button_handle(login_ui_t *lui, ITEM *item)
      const char *name = item_name(item);
 
      if (strcmp(name, DONE_TEXT) == 0) {
-        for (int i = 0; i < lui->numfields; i++) {
-            if (!(field_opts(lui->field[i]) & O_ACTIVE))
-                continue;
-
-            //you can't read out the buffer of a field if the cursor is pointing on it.
-            set_current_field (lui->iform, lui->field[0]);
-
-            //printw("%s", field_buffer(lui->field[i], 0));
-            printf("Read from buffer: }%s{\n",
-                   trim_input(field_buffer(lui->field[i], 0)));
-        } 
+        printf("Should exit now, but dont know how\n");
         sleep(10);
         return 1;
      } else if (strcmp(name, CANCEL_TEXT) == 0) {
-        for (int i = 0; i < lui->numfields; i++) {
-             set_current_field (lui->iform, lui->field[i]);
-             form_driver (lui->iform, REQ_CLR_FIELD);
-        }
+        printf("Cancel..cancel..cancel\n");
      } else {
         exit(1);
      }
@@ -383,7 +339,7 @@ int button_handle(login_ui_t *lui, ITEM *item)
 }
 
 
-void run_login_loop(login_ui_t *lui)
+void run_ui_loop(login_ui_t *lui)
 {
     int ch, cy, cx;
     int stop = 0;
@@ -428,9 +384,6 @@ int teardown_login_screen(login_ui_t *lui)
     unpost_form(lui->iform);
     free_form(lui->iform);
 
-    for (int i = 0; i < lui->numfields; i++)
-        free_field(lui->field[i]);
-
     for (int i = 0; i < lui->numitems; i++)
         free_item(lui->itms[i]);
 
@@ -442,7 +395,6 @@ int teardown_login_screen(login_ui_t *lui)
 
     /* remove menus and also free lui */
     free(lui->itms);
-    free(lui->field);
     free(lui);
 
     endwin();
@@ -454,7 +406,7 @@ int teardown_login_screen(login_ui_t *lui)
     login_ui_t *lui;
 
     lui = setup_login_screen();
-    run_login_loop(lui);
+    run_ui_loop(lui);
     teardown_login_screen(lui);
 }*/
 
@@ -2533,7 +2485,7 @@ int main(int argc, char **argv)
 	//log_err(_("%s: can't exec %s: %m"), options.tty, login_argv[0]);
 
     lui = setup_login_screen();
-    run_login_loop(lui);
+    run_ui_loop(lui);
     teardown_login_screen(lui);
 
     login_now(argc, argv);
