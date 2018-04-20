@@ -1454,8 +1454,6 @@ static void parse_args(int argc, char **argv, struct options *op)
 		RELOAD_OPTION,
 	};
 	const struct option longopts[] = {
-		{  "init-string",    required_argument,  NULL,  'I'  },
-		{  "reload",         no_argument,        NULL,  RELOAD_OPTION },
 		{  "version",	     no_argument,	     NULL,  VERSION_OPTION  },
 		{  "help",	         no_argument,	     NULL,  HELP_OPTION     },
 		{ NULL, 0, NULL, 0 }
@@ -1465,26 +1463,6 @@ static void parse_args(int argc, char **argv, struct options *op)
 			   "8a:cC:d:Ef:hH:iI:Jl:L::mnNo:pP:r:Rst:Uw", longopts,
 			    NULL)) != -1) {
 		switch (c) {
-		case 'L':
-			/* -L and -L=always have the same meaning */
-			op->clocal = CLOCAL_MODE_ALWAYS;
-			if (optarg) {
-				if (strcmp(optarg, "=always") == 0)
-					op->clocal = CLOCAL_MODE_ALWAYS;
-				else if (strcmp(optarg, "=never") == 0)
-					op->clocal = CLOCAL_MODE_NEVER;
-				else if (strcmp(optarg, "=auto") == 0)
-					op->clocal = CLOCAL_MODE_AUTO;
-				else
-					log_err(_("invalid argument of --local-line"));
-			}
-			break;
-		case 'P':
-			op->nice = strtos32_or_err(optarg,  _("invalid nice argument"));
-			break;
-		case 't':
-			op->timeout = strtou32_or_err(optarg,  _("invalid timeout argument"));
-			break;
 		case 'U':
 			op->flags |= F_LCUC;
 			break;
@@ -2501,7 +2479,7 @@ int main(int argc, char **argv)
 	//int login_argc = 0;
 	struct sigaction sa, sa_hup, sa_quit, sa_int;
 	sigset_t set;
-    login_ui_t *lui;
+	login_ui_t *lui;
 
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
