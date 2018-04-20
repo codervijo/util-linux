@@ -1385,6 +1385,34 @@ AS_IF([test "x$have_futimens" = xyes -a "x$have_inotify_init1" = xyes ], [
   AC_MSG_WARN([futimens or inotify_init1 not found; agetty(8) will not provide ---reload functionality])
 ])
 
+AC_ARG_ENABLE([ngetty],
+  AS_HELP_STRING([--disable-ngetty], [do not build ngetty]),
+  [], [UL_DEFAULT_ENABLE([ngetty], [check])]
+)
+UL_BUILD_INIT([ngetty])
+UL_REQUIRES_HAVE([ngetty], [utmpx_h], [utmpx.h header])
+UL_REQUIRES_HAVE([ngetty], [gnu_utmpx], [GNU utmpx fucntions])
+AM_CONDITIONAL([BUILD_NGETTY], [test "x$build_ngetty" = xyes])
+AS_IF([test "x$have_futimens" = xyes -a "x$have_inotify_init1" = xyes ], [
+  AC_DEFINE([NGETTY_RELOAD], [1], [Enable ngetty --reload feature])
+],[
+  AC_MSG_WARN([futimens or inotify_init1 not found; ngetty(8) will not provide ---reload functionality])
+])
+
+AC_ARG_ENABLE([bangetty],
+  AS_HELP_STRING([--disable-bangetty], [do not build bangetty]),
+  [], [UL_DEFAULT_ENABLE([bangetty], [check])]
+)
+UL_BUILD_INIT([bangetty])
+UL_REQUIRES_HAVE([bangetty], [utmpx_h], [utmpx.h header])
+UL_REQUIRES_HAVE([bangetty], [gnu_utmpx], [GNU utmpx fucntions])
+AM_CONDITIONAL([BUILD_BANGETTY], [test "x$build_bangetty" = xyes])
+AS_IF([test "x$have_futimens" = xyes -a "x$have_inotify_init1" = xyes ], [
+  AC_DEFINE([BANGETTY_RELOAD], [1], [Enable bangetty --reload feature])
+],[
+  AC_MSG_WARN([futimens or inotify_init1 not found; bangetty(8) will not provide ---reload functionality])
+])
+
 
 AC_ARG_ENABLE([plymouth_support],
   AS_HELP_STRING([--disable-plymouth_support], [don not care about plymouth in sylogin(8) and agetty(8)]),

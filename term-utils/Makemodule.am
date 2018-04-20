@@ -35,6 +35,20 @@ agetty_LDADD += -lutil
 endif
 endif # BUILD_AGETTY
 
+if BUILD_NGETTY
+sbin_PROGRAMS += ngetty
+#dist_man_MANS += term-utils/agetty.8
+ngetty_SOURCES = term-utils/ngetty.c
+ngetty_LDADD = $(LDADD) libcommon.la -lform -lncurses -lmenu -lpam -lpam_misc
+endif # BUILD_NGETTY
+
+if BUILD_BANGETTY
+sbin_PROGRAMS += bangetty
+#dist_man_MANS += term-utils/agetty.8
+bangetty_SOURCES = term-utils/bangetty.c
+bangetty_LDADD = $(LDADD) libcommon.la -lform -lncurses -lmenu -lpam -lpam_misc
+endif # BUILD_BANGETTY
+
 
 if BUILD_SETTERM
 usrbin_exec_PROGRAMS += setterm
