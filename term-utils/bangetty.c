@@ -81,10 +81,6 @@
 #  define SYSV_STYLE
 #endif
 
-/* Login prompt. */
-#define LOGIN		"login: "
-#define LOGIN_ARGV_MAX	16		/* Numbers of args for login */
-
 /*
  * agetty --reload
  */
@@ -301,8 +297,6 @@ login_ui_t *setup_login_screen(void)
     set_form_sub(lui->iform, derwin(lui->formwin, FORM_SUBWIN_WIDTH, FORM_SUBWIN_HEIGHT, FORM_SUBWIN_START_ROW, FORM_SUBWIN_START_COL));
     post_form(lui->iform);
     //refresh();
-    mvwprintw(lui->formwin, USER_ROW, START_TEXT_COL, "Login    :");
-    mvwprintw(lui->formwin, PSWD_ROW, START_TEXT_COL, "Password :");
     
     lui->itms = (ITEM **)calloc(lui->numitems, sizeof(ITEM *));
     assert(lui->itms != NULL);
@@ -331,7 +325,6 @@ login_ui_t *setup_login_screen(void)
     post_menu(lui->menu);
     //refresh();
     wrefresh(lui->bodywin);
-    wrefresh(lui->formwin);
     wrefresh(lui->menuwin);
 
     return lui;
@@ -406,58 +399,6 @@ void run_login_loop(login_ui_t *lui)
     while (stop != 1 && (ch = wgetch(lui->formwin)) != KEY_ENTER)
     {
         //printf("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
-        if (domenu == 0) {
-            switch(ch) {
-            case KEY_DOWN:
-                if (field_index(current_field(lui->iform)) == 1) {
-                        domenu = 1;
-                        break;
-                }
-                /* Go to next field */
-                form_driver(lui->iform, REQ_NEXT_FIELD);
-                /* Go to the end of the present buffer */
-                /* Leaves nicely at the last character */
-                form_driver(lui->iform, REQ_END_LINE);
-                cy++;
-                cy++;
-                cx = START_INPUT_COL;
-                break;
-            case KEY_UP:
-                /* Go to previous field */
-                form_driver(lui->iform, REQ_PREV_FIELD);
-                form_driver(lui->iform, REQ_END_LINE);
-                cy++;
-                cy++;
-                cx = START_INPUT_COL;
-                break;
-            case KEY_BACKSPACE:
-            case 127:
-                form_driver(lui->iform, REQ_DEL_PREV);
-                cx--;
-                break;
-            case KEY_DC:
-                form_driver(lui->iform, REQ_DEL_CHAR);
-                cx--;
-                break;
-            case KEY_LEFT:
-                form_driver(lui->iform, REQ_PREV_CHAR);
-                cx--;
-                break;
-            case KEY_RIGHT:
-                form_driver(lui->iform, REQ_NEXT_CHAR);
-                cx++;
-                break;
-            default:
-                /* If this is a normal character, it gets */
-                form_driver(lui->iform, ch);
-                cx++;
-                break;
-            }
-            wmove(lui->formwin, cy, cx);
-            //refresh();
-            //wrefresh(lui->formwin);
-            //wrefresh(lui->menuwin);
-        } else {
             switch(ch) {
             case KEY_UP:
                 domenu = 0;
@@ -477,8 +418,6 @@ void run_login_loop(login_ui_t *lui)
             //refresh();
             wrefresh(lui->bodywin);
             wrefresh(lui->menuwin);
-        }
-
     }
 
 }
