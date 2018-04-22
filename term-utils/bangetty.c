@@ -423,26 +423,25 @@ int teardown_login_screen(login_ui_t *lui)
  * Login control struct
  */
 struct login_context {
-	const char	    *tty_path;	/* ttyname() return value */
-	const char	    *tty_name;	/* tty_path without /dev prefix */
-	const char	    *tty_number;	/* end of the tty_path */
-	mode_t		     tty_mode;	/* chmod() mode */
-
-	char		    *username;	/* from command line or PAM */
-	struct passwd	*pwd;		/* user info */
-	char		    *pwdbuf;	/* pwd strings */
+	const char	    *tty_path;	           /* ttyname() return value */
+	const char	    *tty_name;	           /* tty_path without /dev prefix */
+	const char	    *tty_number;	       /* end of the tty_path */
+	mode_t		     tty_mode;	           /* chmod() mode */
+	char		    *username;	           /* from command line or PAM */
+	struct passwd	*pwd;		           /* user info */
+	char		    *pwdbuf;	           /* pwd strings */
 
 #ifdef LOGIN_CHOWN_VCS
-	char		     vcsn[VCS_PATH_MAX];	/* virtual console name */
+	char		     vcsn[VCS_PATH_MAX];   /* virtual console name */
 	char		     vcsan[VCS_PATH_MAX];
 #endif
 
-	char		    *hostname;		/* remote machine */
-	char		     hostaddress[16];	/* remote address */
-	char		    *thishost;	/* this machine */
-	char		    *thisdomain;/* this machine's domain */
+	char		    *hostname;		       /* remote machine */
+	char		     hostaddress[16];	   /* remote address */
+	char		    *thishost;	           /* this machine */
+	char		    *thisdomain;           /* this machine's domain */
 	pid_t		     pid;
-	int		         quiet;		/* 1 if hush file exists */
+	int		         quiet;		           /* 1 if hush file exists */
 	int              noauth;
 };
 
