@@ -81,28 +81,6 @@
 #  define SYSV_STYLE
 #endif
 
-/*
- * agetty --reload
- */
-#ifdef AGETTY_RELOAD
-# include <sys/inotify.h>
-# include <linux/netlink.h>
-# include <linux/rtnetlink.h>
-# define AGETTY_RELOAD_FILENAME "/run/agetty.reload"	/* trigger file */
-# define AGETTY_RELOAD_FDNONE	-2			/* uninitialized fd */
-//static int inotify_fd = AGETTY_RELOAD_FDNONE;
-//static int netlink_fd = AGETTY_RELOAD_FDNONE;
-#endif
-
-/*
- * When multiple baud rates are specified on the command line, the first one
- * we will try is the first one specified.
- */
-#define	FIRST_SPEED	0
-
-/* Storage for command-line options. */
-#define	MAX_SPEED	10	/* max. nr. of baud rates */
-
 struct options {
 	int           flags;			/* toggle switches, see below */
 	unsigned int  timeout;			/* time-out period */
@@ -112,7 +90,6 @@ struct options {
 	char         *issue;			/* alternative issue file or directory */
 	char         *osrelease;		/* /etc/os-release data */
 	unsigned int  delay;			/* Sleep seconds before prompt */
-	int           nice;			    /* Run login with this priority */
 	int           numspeed;			/* number of baud rates to try */
 	int           clocal;			/* CLOCAL_MODE_* */
 	int           kbmode;			/* Keyboard mode if virtual console */
@@ -159,7 +136,6 @@ static void log_warn (const char *, ...)
 				__attribute__((__format__(printf, 1, 2)));
 //static ssize_t append(char *dest, size_t len, const char  *sep, const char *src);
 static void check_username (const char* nm);
-static void reload_agettys(void);
 static void print_issue_file(struct options *op, struct termios *tp);
 
 #ifdef DEBUGGING
@@ -227,7 +203,6 @@ typedef struct login_ui_s {
 } login_ui_t;
 
 login_ui_t *setup_login_screen(void);
-static char *trim_input(char *input);
 int button_handle(login_ui_t *lui, ITEM *item);
 void run_ui_loop(login_ui_t *lui);
 int teardown_login_screen(login_ui_t *lui);
@@ -297,29 +272,6 @@ login_ui_t *setup_login_screen(void)
     wrefresh(lui->menuwin);
 
     return lui;
-}
-
-static char *trim_input(char *input)
-{
-     char *end;
-
-     if (input == NULL)
-        return NULL;
-
-     while (isspace(*input))
-        input++;
-
-     if (*input == 0)
-        return input;
-
-     end = input + strnlen(input, 128) - 1;
-
-     while (end > input && isspace(*end))
-        end--;
-
-     *(end+1) = '\0';
-
-     return input;
 }
 
 int button_handle(login_ui_t *lui, ITEM *item)
@@ -467,26 +419,6 @@ static int is_consoletty(int fd)
 }
 #endif
 
-#if 0
-static char *xgethostname(void)
-{
-	char *name;
-	size_t sz = get_hostname_max() + 1;
-
-	name = malloc(sizeof(char) * sz);
-	if (!name)
-		log_err(_("failed to allocate memory: %m"));
-
-	if (gethostname(name, sz) != 0) {
-		free(name);
-		return NULL;
-	}
-	name[sz - 1] = '\0';
-	return name;
-}
-#endif
-
-
 static void __attribute__ ((__noreturn__))
 timedout2(int sig __attribute__ ((__unused__)))
 {
@@ -592,48 +524,6 @@ static void motd(void)
 
 	free(motdlist);
 }
-
-#if 0
-/*
- * Nice and simple code provided by Linus Torvalds 16-Feb-93.
- * Non-blocking stuff by Maciej W. Rozycki, macro@ds2.pg.gda.pl, 1999.
- *
- * He writes: "Login performs open() on a tty in a blocking mode.
- * In some cases it may make login wait in open() for carrier infinitely,
- * for example if the line is a simplistic case of a three-wire serial
- * connection. I believe login should open the line in non-blocking mode,
- * leaving the decision to make a connection to getty (where it actually
- * belongs)."
- */
-static void open_tty(const char *tty)
-{
-	int i, fd, flags;
-
-	fd = open(tty, O_RDWR | O_NONBLOCK);
-	if (fd == -1) {
-		syslog(LOG_ERR, _("FATAL: can't reopen tty: %m"));
-		sleepexit(EXIT_FAILURE);
-	}
-
-	if (!isatty(fd)) {
-		close(fd);
-		syslog(LOG_ERR, _("FATAL: %s is not a terminal"), tty);
-		sleepexit(EXIT_FAILURE);
-	}
-
-	flags = fcntl(fd, F_GETFL);
-	flags &= ~O_NONBLOCK;
-	fcntl(fd, F_SETFL, flags);
-
-	for (i = 0; i < fd; i++)
-		close(i);
-	for (i = 0; i < 3; i++)
-		if (fd != i)
-			dup2(fd, i);
-	if (fd >= 3)
-		close(fd);
-}
-#endif
 
 #define chown_err(_what, _uid, _gid) \
 		syslog(LOG_ERR, _("chown (%s, %lu, %lu) failed: %m"), \
@@ -973,12 +863,8 @@ static void log_syslog(struct login_context *cxt)
 		else
 			syslog(LOG_NOTICE, _("ROOT LOGIN ON %s"), cxt->tty_name);
 	} else {
-		if (cxt->hostname)
-			syslog(LOG_INFO, _("LOGIN ON %s BY %s FROM %s"),
-			       cxt->tty_name, pwd->pw_name, cxt->hostname);
-		else
-			syslog(LOG_INFO, _("LOGIN ON %s BY %s"), cxt->tty_name,
-			       pwd->pw_name);
+        syslog(LOG_NOTICE, _("NON-ROOT LOGIN ON %s FROM %s using BANGETTY!!"),
+               cxt->tty_name, cxt->hostname);
 	}
 }
 
@@ -1344,25 +1230,19 @@ static void parse_args(int argc, char **argv, struct options *op)
 		RELOAD_OPTION,
 	};
 	const struct option longopts[] = {
-		{  "version",	     no_argument,	     NULL,  VERSION_OPTION  },
-		{  "help",	         no_argument,	     NULL,  HELP_OPTION     },
+		{  "version",	     no_argument,	     NULL,  'v'  },
+		{  "help",	         no_argument,	     NULL,  'h'     },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	while ((c = getopt_long(argc, argv,
-			   "8a:cC:d:Ef:hH:iI:Jl:L::mnNo:pP:r:Rst:Uw", longopts,
+			   "hv", longopts,
 			    NULL)) != -1) {
 		switch (c) {
-		case 'U':
-			op->flags |= F_LCUC;
-			break;
-		case RELOAD_OPTION:
-			reload_agettys();
-			exit(EXIT_SUCCESS);
-		case VERSION_OPTION:
+		case 'v':
 			output_version();
 			exit(EXIT_SUCCESS);
-		case HELP_OPTION:
+		case 'h':
 			usage();
 		default:
 			errtryhelp(EXIT_FAILURE);
@@ -1784,331 +1664,12 @@ static void reset_vc(const struct options *op, struct termios *tp)
 	      fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 }
 
-#ifdef AGETTY_RELOAD
-#if 0
-static void open_netlink(void)
-{
-	struct sockaddr_nl addr = { 0, };
-	int sock;
-
-	if (netlink_fd != AGETTY_RELOAD_FDNONE)
-		return;
-
-	sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-	if (sock >= 0) {
-		addr.nl_family = AF_NETLINK;
-		addr.nl_pid = getpid();
-		addr.nl_groups = RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR;
-		if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-			close(sock);
-		else
-			netlink_fd = sock;
-	}
-}
-
-static int process_netlink_msg(int *changed)
-{
-	char buf[4096];
-	struct sockaddr_nl snl;
-	struct nlmsghdr *h;
-	int rc;
-
-	struct iovec iov = {
-		.iov_base = buf,
-		.iov_len = sizeof(buf)
-	};
-	struct msghdr msg = {
-		.msg_name = &snl,
-		.msg_namelen = sizeof(snl),
-		.msg_iov = &iov,
-		.msg_iovlen = 1,
-		.msg_control = NULL,
-		.msg_controllen = 0,
-		.msg_flags = 0
-	};
-
-	rc = recvmsg(netlink_fd, &msg, MSG_DONTWAIT);
-	if (rc < 0) {
-		if (errno == EWOULDBLOCK || errno == EAGAIN)
-			return 0;
-
-		/* Failure, just stop listening for changes */
-		close(netlink_fd);
-		netlink_fd = AGETTY_RELOAD_FDNONE;
-		return 0;
-	}
-
-	for (h = (struct nlmsghdr *)buf; NLMSG_OK(h, (unsigned int)rc); h = NLMSG_NEXT(h, rc)) {
-		if (h->nlmsg_type == NLMSG_DONE ||
-		    h->nlmsg_type == NLMSG_ERROR) {
-			close(netlink_fd);
-			netlink_fd = AGETTY_RELOAD_FDNONE;
-			return 0;
-		}
-
-		*changed = 1;
-		break;
-	}
-
-	return 1;
-}
-
-static int process_netlink(void)
-{
-	int changed = 0;
-	while (process_netlink_msg(&changed));
-	return changed;
-}
-#endif
-
-#if 0
-static int wait_for_term_input(int fd)
-{
-	char buffer[sizeof(struct inotify_event) + NAME_MAX + 1];
-	fd_set rfds;
-
-	if (inotify_fd == AGETTY_RELOAD_FDNONE) {
-		/* make sure the reload trigger file exists */
-		int reload_fd = open(AGETTY_RELOAD_FILENAME,
-					O_CREAT|O_CLOEXEC|O_RDONLY,
-					S_IRUSR|S_IWUSR);
-
-		/* initialize reload trigger inotify stuff */
-		if (reload_fd >= 0) {
-			inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
-			if (inotify_fd > 0)
-				inotify_add_watch(inotify_fd, AGETTY_RELOAD_FILENAME,
-					  IN_ATTRIB | IN_MODIFY);
-
-			close(reload_fd);
-		} else
-			log_warn(_("failed to create reload file: %s: %m"),
-					AGETTY_RELOAD_FILENAME);
-	}
-
-	while (1) {
-		int nfds = fd;
-
-		FD_ZERO(&rfds);
-		FD_SET(fd, &rfds);
-
-		if (inotify_fd >= 0) {
-			FD_SET(inotify_fd, &rfds);
-			nfds = max(nfds, inotify_fd);
-		}
-		if (netlink_fd >= 0) {
-			FD_SET(netlink_fd, &rfds);
-			nfds = max(nfds, netlink_fd);
-		}
-
-		/* If waiting fails, just fall through, presumably reading input will fail */
-		if (select(nfds + 1, &rfds, NULL, NULL, NULL) < 0)
-			return 1;
-
-		if (FD_ISSET(fd, &rfds)) {
-			return 1;
-
-		} else if (netlink_fd >= 0 && FD_ISSET(netlink_fd, &rfds)) {
-			if (!process_netlink())
-				continue;
-
-		/* Just drain the inotify buffer */
-		} else if (inotify_fd >= 0 && FD_ISSET(inotify_fd, &rfds)) {
-			while (read(inotify_fd, buffer, sizeof (buffer)) > 0);
-		}
-
-		return 0;
-	}
-}
-#endif  /* AGETTY_RELOAD */
-#endif
-
 static void print_issue_file(struct options *op, struct termios *tp __attribute__((__unused__)))
 {
     (void)op;
 	/* Issue not in use, start with a new line. */
 	write_all(STDOUT_FILENO, "\r\n", 2);
 }
-
-#if 0
-/* Show login prompt, optionally preceded by /etc/issue contents. */
-static void do_prompt(struct options *op, struct termios *tp)
-{
-#ifdef AGETTY_RELOAD
-again:
-#endif
-	print_issue_file(op, tp);
-
-#ifdef KDGKBLED
-	if ((op->flags & F_VCONSOLE)) {
-		int kb = 0;
-
-		if (ioctl(STDIN_FILENO, KDGKBLED, &kb) == 0) {
-			char hint[256] = { '\0' };
-			int nl = 0;
-
-			if (access(_PATH_NUMLOCK_ON, F_OK) == 0)
-				nl = 1;
-
-			if (nl && (kb & 0x02) == 0)
-				append(hint, sizeof(hint), NULL, _("Num Lock off"));
-
-			else if (nl == 0 && (kb & 2) && (kb & 0x20) == 0)
-				append(hint, sizeof(hint), NULL, _("Num Lock on"));
-
-			if ((kb & 0x04) && (kb & 0x40) == 0)
-				append(hint, sizeof(hint), ", ", _("Caps Lock on"));
-
-			if ((kb & 0x01) && (kb & 0x10) == 0)
-				append(hint, sizeof(hint), ", ",  _("Scroll Lock on"));
-
-			if (*hint)
-				printf(_("Hint: %s\n\n"), hint);
-		}
-	}
-#endif /* KDGKBLED */
-		char *hn = xgethostname();
-
-		if (hn) {
-			char *dot = strchr(hn, '.');
-			char *cn = hn;
-			struct addrinfo *res = NULL;
-
-				if (dot)
-					*dot = '\0';
-
-			if (dot == NULL) {
-				struct addrinfo hints;
-
-				memset(&hints, 0, sizeof(hints));
-				hints.ai_flags = AI_CANONNAME;
-
-				if (!getaddrinfo(hn, NULL, &hints, &res)
-				    && res && res->ai_canonname)
-					cn = res->ai_canonname;
-			}
-
-			write_all(STDOUT_FILENO, cn, strlen(cn));
-			write_all(STDOUT_FILENO, " ", 1);
-
-			if (res)
-				freeaddrinfo(res);
-			free(hn);
-		}
-
-		/* Always show login prompt. */
-		write_all(STDOUT_FILENO, LOGIN, sizeof(LOGIN) - 1);
-}
-#endif
-
-#if 0
-/* Get user name, establish parity, speed, erase, kill & eol. */
-static char *get_logname(struct options *op, struct termios *tp, struct chardata *cp)
-{
-	static char logname[BUFSIZ];
-	char *bp;
-	char c;			/* input character, full eight bits */
-	char ascval;		/* low 7 bits of input character */
-	int eightbit;
-	//static char *erase[] = {	/* backspace-space-backspace */
-	//	"\010\040\010",		/* space parity */
-	//	"\010\040\010",		/* odd parity */
-	//	"\210\240\210",		/* even parity */
-	//	"\210\240\210",		/* no parity */
-	//};
-
-	/* Initialize kill, erase, parity etc. (also after switching speeds). */
-	INIT_CHARDATA(cp);
-
-	/*
-	 * Flush pending input (especially important after parsing or switching
-	 * the baud rate).
-	 */
-	if ((op->flags & F_VCONSOLE) == 0)
-		sleep(1);
-	tcflush(STDIN_FILENO, TCIFLUSH);
-
-	bp = logname;
-	*bp = '\0';
-
-	while (*logname == '\0') {
-		/* Write issue file and prompt */
-		do_prompt(op, tp);
-
-#ifdef AGETTY_RELOAD
-		if (!wait_for_term_input(STDIN_FILENO)) {
-			/* refresh prompt -- discard input data, clear terminal
-			 * and call do_prompt() again
-			 */
-			if ((op->flags & F_VCONSOLE) == 0)
-				sleep(1);
-			tcflush(STDIN_FILENO, TCIFLUSH);
-			if (op->flags & F_VCONSOLE)
-				termio_clear(STDOUT_FILENO);
-			bp = logname;
-			*bp = '\0';
-			continue;
-		}
-#endif
-		cp->eol = '\0';
-
-		/* Read name, watch for break and end-of-line. */
-		while (cp->eol == '\0') {
-
-			ssize_t readres;
-
-			debug("read from FD\n");
-			readres = read(STDIN_FILENO, &c, 1);
-			if (readres < 0) {
-				debug("read failed\n");
-
-				/* The terminal could be open with O_NONBLOCK when
-				 * -L (force CLOCAL) is specified...  */
-				if (errno == EINTR || errno == EAGAIN) {
-					xusleep(250000);
-					continue;
-				}
-				switch (errno) {
-				case 0:
-				case EIO:
-				case ESRCH:
-				case EINVAL:
-				case ENOENT:
-					exit_slowly(EXIT_SUCCESS);
-				default:
-					log_err(_("%s: read: %m"), op->tty);
-				}
-			}
-
-			if (readres == 0)
-				c = 0;
-
-			/* Do parity bit handling. */
-			if (eightbit)
-				ascval = c;
-			else if (c != (ascval = (c & 0177))) {
-				uint32_t bits;			/* # of "1" bits per character */
-				uint32_t mask;			/* mask with 1 bit up */
-				for (bits = 1, mask = 1; mask & 0177; mask <<= 1) {
-					if (mask & ascval)
-						bits++;
-				}
-				cp->parity |= ((bits & 1) ? 1 : 2);
-			}
-		}
-	}
-
-	if ((op->flags & F_LCUC) && (cp->capslock = caps_lock(logname))) {
-
-		/* Handle names with upper case and no lower case. */
-		for (bp = logname; *bp; bp++)
-			if (isupper(*bp))
-				*bp = tolower(*bp);		/* map name to lower case */
-	}
-
-	return logname;
-}
-#endif
 
 /* Set the final tty mode bits. */
 static void termio_final(struct options *op, struct termios *tp, struct chardata *cp)
@@ -2177,26 +1738,6 @@ static void termio_final(struct options *op, struct termios *tp, struct chardata
 		log_err(_("%s: failed to set terminal attributes: %m"), op->tty);
 }
 
-#if 0
-/*
- * String contains upper case without lower case.
- * http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=52940
- * http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=156242
- */
-static int caps_lock(char *s)
-{
-	int capslock;
-
-	for (capslock = 0; *s; s++) {
-		if (islower(*s))
-			return EXIT_SUCCESS;
-		if (capslock == 0)
-			capslock = isupper(*s);
-	}
-	return capslock;
-}
-#endif
-
 static void __attribute__((__noreturn__)) usage(void)
 {
 	FILE *out = stdout;
@@ -2221,31 +1762,6 @@ static void __attribute__((__noreturn__)) usage(void)
  * it takes a format as well as va_list.
  */
 #define	str2cpy(b,s1,s2)	strcat(strcpy(b,s1),s2)
-
-#if 0
-static void dolog(const char *fmt, va_list ap)
-{
-	int fd;
-	char buf[BUFSIZ];
-	char *bp;
-
-	/*
-	 * If the diagnostic is reported via syslog(3), the process name is
-	 * automatically prepended to the message. If we write directly to
-	 * /dev/console, we must prepend the process name ourselves.
-	 */
-	str2cpy(buf, program_invocation_short_name, ": ");
-	bp = buf + strlen(buf);
-	vsnprintf(bp, sizeof(buf)-strlen(buf), fmt, ap);
-
-	/* Terminate with CR-LF since the console mode is unknown. */
-	strcat(bp, "\r\n");
-	if ((fd = open("/dev/console", 1)) >= 0) {
-		write_all(fd, buf, strlen(buf));
-		close(fd);
-	}
-}
-#endif
 
 static void exit_slowly(int code)
 {
@@ -2274,50 +1790,6 @@ static void log_warn(const char *fmt, ...)
 	va_end(ap);
 }
 
-#if 0
-static void print_addr(sa_family_t family, void *addr)
-{
-	char buff[INET6_ADDRSTRLEN + 1];
-
-	inet_ntop(family, addr, buff, sizeof(buff));
-	printf("%s", buff);
-}
-
-/*
- * Appends @str to @dest and if @dest is not empty then use @sep as a
- * separator. The maximal final length of the @dest is @len.
- *
- * Returns the final @dest length or -1 in case of error.
- */
-static ssize_t append(char *dest, size_t len, const char  *sep, const char *src)
-{
-	size_t dsz = 0, ssz = 0, sz;
-	char *p;
-
-	if (!dest || !len || !src)
-		return -1;
-
-	if (*dest)
-		dsz = strlen(dest);
-	if (dsz && sep)
-		ssz = strlen(sep);
-	sz = strlen(src);
-
-	if (dsz + ssz + sz + 1 > len)
-		return -1;
-
-	p = dest + dsz;
-	if (ssz) {
-		memcpy(p, sep, ssz);
-		p += ssz;
-	}
-	memcpy(p, src, sz);
-	*(p + sz) = '\0';
-
-	return dsz + ssz + sz;
-}
-#endif
-
 /*
  * Do not allow the user to pass an option as a user name
  * To be more safe: Use `--' to make sure the rest is
@@ -2338,23 +1810,6 @@ static void check_username(const char* nm)
 err:
 	errno = EPERM;
 	log_err(_("checkname failed: %m"));
-}
-
-static void reload_agettys(void)
-{
-#ifdef AGETTY_RELOAD
-	int fd = open(AGETTY_RELOAD_FILENAME, O_CREAT|O_CLOEXEC|O_WRONLY,
-					      S_IRUSR|S_IWUSR);
-	if (fd < 0)
-		err(EXIT_FAILURE, _("cannot open %s"), AGETTY_RELOAD_FILENAME);
-
-	if (futimens(fd, NULL) < 0 || close(fd) < 0)
-		err(EXIT_FAILURE, _("cannot touch file %s"),
-		    AGETTY_RELOAD_FILENAME);
-#else
-	/* very unusual */
-	errx(EXIT_FAILURE, _("--reload is unsupported on your system"));
-#endif
 }
 
 int main(int argc, char **argv)
@@ -2466,12 +1921,6 @@ int main(int argc, char **argv)
 
 	if (username)
 		check_username(username);
-
-	//login_argv[login_argc] = NULL;	/* last login argv */
-
-	if (options.nice && nice(options.nice) < 0)
-		log_warn(_("%s: can't change process priority: %m"),
-			 options.tty);
 
 	free(options.osrelease);
 #ifdef DEBUGGING
