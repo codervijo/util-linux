@@ -126,12 +126,12 @@ static void reset_vc (const struct options *op, struct termios *tp);
 //static char *get_logname(struct options *op,
 //			             struct termios *tp, struct chardata *cp);
 static void termio_final(struct options *op,
-			             struct termios *tp, struct chardata *cp);
+						 struct termios *tp, struct chardata *cp);
 //static int caps_lock(char *s);
 static void usage(void) __attribute__((__noreturn__));
 static void exit_slowly(int code) __attribute__((__noreturn__));
 static void log_err(const char *, ...) __attribute__((__noreturn__))
-			       __attribute__((__format__(printf, 1, 2)));
+				   __attribute__((__format__(printf, 1, 2)));
 static void log_warn (const char *, ...)
 				__attribute__((__format__(printf, 1, 2)));
 //static ssize_t append(char *dest, size_t len, const char  *sep, const char *src);
@@ -193,13 +193,13 @@ FILE *dbf;
 #define CANCEL_TEXT                              "Cancel"
 
 typedef struct login_ui_s {
-    int      numitems;
-    FORM    *iform;
-    ITEM   **itms;
-    MENU    *menu;
-    WINDOW  *bodywin;
-    WINDOW  *formwin;
-    WINDOW  *menuwin;
+	int      numitems;
+	FORM    *iform;
+	ITEM   **itms;
+	MENU    *menu;
+	WINDOW  *bodywin;
+	WINDOW  *formwin;
+	WINDOW  *menuwin;
 } login_ui_t;
 
 login_ui_t *setup_login_screen(void);
@@ -210,156 +210,156 @@ void login_now(int argc, char **argv);
 
 login_ui_t *setup_login_screen(void)
 {
-    login_ui_t *lui;
-    //WINDOW *tmpw1;
+	login_ui_t *lui;
+	//WINDOW *tmpw1;
 
-    /* Initialize curses */
-    initscr();
-    start_color();
-    cbreak();
-    curs_set(0);
-    noecho();
-    keypad(stdscr, TRUE);
+	/* Initialize curses */
+	initscr();
+	start_color();
+	cbreak();
+	curs_set(0);
+	noecho();
+	keypad(stdscr, TRUE);
 
-    init_pair(1, COLOR_WHITE, COLOR_BLUE);
-    init_pair(2, COLOR_WHITE, COLOR_BLUE);
+	init_pair(1, COLOR_WHITE, COLOR_BLUE);
+	init_pair(2, COLOR_WHITE, COLOR_BLUE);
 
-    lui   = malloc(sizeof(login_ui_t));
-    lui->numitems  = NUM_ITEMS;
-    lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
-    assert(lui->bodywin != NULL);
-    lui->formwin = derwin(lui->bodywin, FORM_WINDOW_HEIGHT, FORM_WINDOW_WIDTH, FORM_WINDOW_START_ROW, FORM_WINDOW_START_COL);
-    assert(lui->formwin != NULL);
-    //box(lui->formwin, 0, 0);
-    //lui->menuwin = newwin(2, 12, MENU_ROW, 30);
-    lui->menuwin = derwin(lui->bodywin, MENU_WINDOW_HEIGHT, MENU_WINDOW_WIDTH, MENU_WINDOW_START_ROW, MENU_WINDOW_START_COL);
-    assert(lui->menuwin != NULL);
-    //box(lui->menuwin, 0, 0);
-    //lui->menuwin = newwin(2, 12, MENU_ROW, 30);
-    set_form_win(lui->iform, lui->formwin);
-    //tmpw1 = derwin(lui->formwin, 10, 40, USER_ROW-1, START_TEXT_COL-2);
-    //box(tmpw1, 0, 0);
-    //set_form_sub(lui->iform, tmpw1);
-    set_form_sub(lui->iform, derwin(lui->formwin, FORM_SUBWIN_WIDTH, FORM_SUBWIN_HEIGHT, FORM_SUBWIN_START_ROW, FORM_SUBWIN_START_COL));
-    post_form(lui->iform);
-    //refresh();
-    
-    lui->itms = (ITEM **)calloc(lui->numitems, sizeof(ITEM *));
-    assert(lui->itms != NULL);
-    lui->itms[0] = new_item(CANCEL_TEXT, CANCEL_TEXT);
-    lui->itms[1] = new_item(DONE_TEXT, DONE_TEXT);
-    lui->itms[2] = (ITEM*)NULL;
-    assert(lui->itms[0] != NULL);
-    assert(lui->itms[1] != NULL);
+	lui   = malloc(sizeof(login_ui_t));
+	lui->numitems  = NUM_ITEMS;
+	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
+	assert(lui->bodywin != NULL);
+	lui->formwin = derwin(lui->bodywin, FORM_WINDOW_HEIGHT, FORM_WINDOW_WIDTH, FORM_WINDOW_START_ROW, FORM_WINDOW_START_COL);
+	assert(lui->formwin != NULL);
+	//box(lui->formwin, 0, 0);
+	//lui->menuwin = newwin(2, 12, MENU_ROW, 30);
+	lui->menuwin = derwin(lui->bodywin, MENU_WINDOW_HEIGHT, MENU_WINDOW_WIDTH, MENU_WINDOW_START_ROW, MENU_WINDOW_START_COL);
+	assert(lui->menuwin != NULL);
+	//box(lui->menuwin, 0, 0);
+	//lui->menuwin = newwin(2, 12, MENU_ROW, 30);
+	set_form_win(lui->iform, lui->formwin);
+	//tmpw1 = derwin(lui->formwin, 10, 40, USER_ROW-1, START_TEXT_COL-2);
+	//box(tmpw1, 0, 0);
+	//set_form_sub(lui->iform, tmpw1);
+	set_form_sub(lui->iform, derwin(lui->formwin, FORM_SUBWIN_WIDTH, FORM_SUBWIN_HEIGHT, FORM_SUBWIN_START_ROW, FORM_SUBWIN_START_COL));
+	post_form(lui->iform);
+	//refresh();
+	
+	lui->itms = (ITEM **)calloc(lui->numitems, sizeof(ITEM *));
+	assert(lui->itms != NULL);
+	lui->itms[0] = new_item(CANCEL_TEXT, CANCEL_TEXT);
+	lui->itms[1] = new_item(DONE_TEXT, DONE_TEXT);
+	lui->itms[2] = (ITEM*)NULL;
+	assert(lui->itms[0] != NULL);
+	assert(lui->itms[1] != NULL);
 
-    keypad(lui->menuwin, TRUE);
-    //refresh();
-    lui->menu = new_menu((ITEM **)lui->itms);
-    assert(lui->menu != NULL);
-    menu_opts_off(lui->menu, O_SHOWDESC);
-    menu_opts_on(lui->menu, O_ROWMAJOR);
-    set_menu_win(lui->menu, lui->menuwin);
-    set_menu_format(lui->menu, 1, 20);
-    set_menu_mark(lui->menu, "");
+	keypad(lui->menuwin, TRUE);
+	//refresh();
+	lui->menu = new_menu((ITEM **)lui->itms);
+	assert(lui->menu != NULL);
+	menu_opts_off(lui->menu, O_SHOWDESC);
+	menu_opts_on(lui->menu, O_ROWMAJOR);
+	set_menu_win(lui->menu, lui->menuwin);
+	set_menu_format(lui->menu, 1, 20);
+	set_menu_mark(lui->menu, "");
 
-    //form_driver (lui->iform, REQ_CLR_FIELD);
+	//form_driver (lui->iform, REQ_CLR_FIELD);
 
-    form_driver (lui->iform, REQ_CLR_FIELD);
+	form_driver (lui->iform, REQ_CLR_FIELD);
 
-    post_menu(lui->menu);
-    //refresh();
-    wrefresh(lui->bodywin);
-    wrefresh(lui->menuwin);
+	post_menu(lui->menu);
+	//refresh();
+	wrefresh(lui->bodywin);
+	wrefresh(lui->menuwin);
 
-    return lui;
+	return lui;
 }
 
 int button_handle(login_ui_t *lui, ITEM *item)
 {
-     const char *name = item_name(item);
+	 const char *name = item_name(item);
 
-     if (strcmp(name, DONE_TEXT) == 0) {
-        printf("Should exit now, but dont know how\n");
-        sleep(10);
-        return 1;
-     } else if (strcmp(name, CANCEL_TEXT) == 0) {
-        printf("Cancel..cancel..cancel\n");
-     } else {
-        exit(1);
-     }
-     return 0;
+	 if (strcmp(name, DONE_TEXT) == 0) {
+		printf("Should exit now, but dont know how\n");
+		sleep(10);
+		return 1;
+	 } else if (strcmp(name, CANCEL_TEXT) == 0) {
+		printf("Cancel..cancel..cancel\n");
+	 } else {
+		exit(1);
+	 }
+	 return 0;
 }
 
 
 void run_ui_loop(login_ui_t *lui)
 {
-    int ch, cy, cx;
-    int stop = 0;
-    int domenu = 0;
+	int ch, cy, cx;
+	int stop = 0;
+	int domenu = 0;
 
-    keypad(lui->formwin, true);
-    curs_set(1);
-    cy = USER_ROW;
-    cx = START_INPUT_COL;
-    wmove(lui->formwin, cy, cx);
-    wrefresh(lui->formwin);
-    /* Loop through to get user requests */
-    while (stop != 1 && (ch = wgetch(lui->formwin)) != KEY_ENTER)
-    {
-        //printf("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
-            switch(ch) {
-            case KEY_UP:
-                domenu = 0;
-                break;
-            case KEY_LEFT:
-                menu_driver(lui->menu, REQ_LEFT_ITEM);
-                break;
-            case KEY_RIGHT:
-                menu_driver(lui->menu, REQ_RIGHT_ITEM);
-                break;
-            case 10:
-                if (button_handle(lui, current_item(lui->menu)) == 1) {
-                     stop = 1;
-                     break;
-                }
-            }
-            //refresh();
-            wrefresh(lui->bodywin);
-            wrefresh(lui->menuwin);
-    }
+	keypad(lui->formwin, true);
+	curs_set(1);
+	cy = USER_ROW;
+	cx = START_INPUT_COL;
+	wmove(lui->formwin, cy, cx);
+	wrefresh(lui->formwin);
+	/* Loop through to get user requests */
+	while (stop != 1 && (ch = wgetch(lui->formwin)) != KEY_ENTER)
+	{
+		//printf("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
+			switch(ch) {
+			case KEY_UP:
+				domenu = 0;
+				break;
+			case KEY_LEFT:
+				menu_driver(lui->menu, REQ_LEFT_ITEM);
+				break;
+			case KEY_RIGHT:
+				menu_driver(lui->menu, REQ_RIGHT_ITEM);
+				break;
+			case 10:
+				if (button_handle(lui, current_item(lui->menu)) == 1) {
+					 stop = 1;
+					 break;
+				}
+			}
+			//refresh();
+			wrefresh(lui->bodywin);
+			wrefresh(lui->menuwin);
+	}
 
 }
 
 int teardown_login_screen(login_ui_t *lui)
 {
-    /* Un post form and free the memory */
-    unpost_form(lui->iform);
-    free_form(lui->iform);
+	/* Un post form and free the memory */
+	unpost_form(lui->iform);
+	free_form(lui->iform);
 
-    for (int i = 0; i < lui->numitems; i++)
-        free_item(lui->itms[i]);
+	for (int i = 0; i < lui->numitems; i++)
+		free_item(lui->itms[i]);
 
-    free_menu(lui->menu);
+	free_menu(lui->menu);
 
-    delwin(lui->formwin);
-    delwin(lui->menuwin);
-    delwin(lui->bodywin);
+	delwin(lui->formwin);
+	delwin(lui->menuwin);
+	delwin(lui->bodywin);
 
-    /* remove menus and also free lui */
-    free(lui->itms);
-    free(lui);
+	/* remove menus and also free lui */
+	free(lui->itms);
+	free(lui);
 
-    endwin();
-    return 0;
+	endwin();
+	return 0;
 }
 
 /*int main()
 {
-    login_ui_t *lui;
+	login_ui_t *lui;
 
-    lui = setup_login_screen();
-    run_ui_loop(lui);
-    teardown_login_screen(lui);
+	lui = setup_login_screen();
+	run_ui_loop(lui);
+	teardown_login_screen(lui);
 }*/
 
 #ifdef USE_TTY_GROUP
@@ -411,8 +411,8 @@ static int is_consoletty(int fd)
 	struct stat stb;
 
 	if ((fstat(fd, &stb) >= 0)
-	    && (major(stb.st_rdev) == TTY_MAJOR)
-	    && (minor(stb.st_rdev) < 64)) {
+		&& (major(stb.st_rdev) == TTY_MAJOR)
+		&& (minor(stb.st_rdev) < 64)) {
 		return 1;
 	}
 	return 0;
@@ -509,7 +509,7 @@ static void motd(void)
 	motdlist = xstrdup(mb);
 
 	for (motdfile = strtok(motdlist, ":"); motdfile;
-	     motdfile = strtok(NULL, ":")) {
+		 motdfile = strtok(NULL, ":")) {
 
 		struct stat st;
 		int fd;
@@ -545,8 +545,8 @@ static void chown_tty(struct login_context *cxt)
 			gid = gr->gr_gid;
 		else {	/* group by ID */
 			gidstr = getenv("TTYGROUP");
-            gid    = (gid_t) atoi(gidstr);
-        }
+			gid    = (gid_t) atoi(gidstr);
+		}
 	}
 	if (fchown(0, uid, gid))				/* tty */
 		chown_err(cxt->tty_name, uid, gid);
@@ -573,12 +573,12 @@ static void chown_tty(struct login_context *cxt)
  */
 static void init_tty(struct login_context *cxt)
 {
-    char *ttymodestr;
+	char *ttymodestr;
 	struct stat st;
 	struct termios tt, ttt;
 
 	ttymodestr    = getenv("TTYPERM");
-    cxt->tty_mode = (mode_t) atoi(ttymodestr);
+	cxt->tty_mode = (mode_t) atoi(ttymodestr);
 
 	get_terminal_name(&cxt->tty_path, &cxt->tty_name, &cxt->tty_number);
 
@@ -591,9 +591,9 @@ static void init_tty(struct login_context *cxt)
 	 * All of this is a problem only when login is suid, which it isn't.
 	 */
 	if (!cxt->tty_path || !*cxt->tty_path ||
-	    lstat(cxt->tty_path, &st) != 0 || !S_ISCHR(st.st_mode) ||
-	    (st.st_nlink > 1 && strncmp(cxt->tty_path, "/dev/", 5)) ||
-	    access(cxt->tty_path, R_OK | W_OK) != 0) {
+		lstat(cxt->tty_path, &st) != 0 || !S_ISCHR(st.st_mode) ||
+		(st.st_nlink > 1 && strncmp(cxt->tty_path, "/dev/", 5)) ||
+		access(cxt->tty_path, R_OK | W_OK) != 0) {
 
 		syslog(LOG_ERR, _("FATAL: bad tty"));
 		sleepexit(EXIT_FAILURE);
@@ -673,7 +673,7 @@ static void log_btmp(struct login_context *cxt)
 		xstrncpy(ut.ut_host, cxt->hostname, sizeof(ut.ut_host));
 		if (*cxt->hostaddress)
 			memcpy(&ut.ut_addr_v6, cxt->hostaddress,
-			       sizeof(ut.ut_addr_v6));
+				   sizeof(ut.ut_addr_v6));
 	}
 
 	updwtmpx(_PATH_BTMP, &ut);
@@ -693,15 +693,15 @@ static void log_audit(struct login_context *cxt, int status)
 		pwd = getpwnam(cxt->username);
 
 	audit_log_acct_message(audit_fd,
-			       AUDIT_USER_LOGIN,
-			       NULL,
-			       "login",
-			       cxt->username ? cxt->username : "(unknown)",
-			       pwd ? pwd->pw_uid : (unsigned int) -1,
-			       cxt->hostname,
-			       NULL,
-			       cxt->tty_name,
-			       status);
+				   AUDIT_USER_LOGIN,
+				   NULL,
+				   "login",
+				   cxt->username ? cxt->username : "(unknown)",
+				   pwd ? pwd->pw_uid : (unsigned int) -1,
+				   cxt->hostname,
+				   NULL,
+				   cxt->tty_name,
+				   status);
 
 	close(audit_fd);
 }
@@ -742,10 +742,10 @@ static void log_lastlog(struct login_context *cxt)
 			printf(_("Last login: %.*s "), 24 - 5, ctime(&ll_time));
 			if (*ll.ll_host != '\0')
 				printf(_("from %.*s\n"),
-				       (int)sizeof(ll.ll_host), ll.ll_host);
+					   (int)sizeof(ll.ll_host), ll.ll_host);
 			else
 				printf(_("on %.*s\n"),
-				       (int)sizeof(ll.ll_line), ll.ll_line);
+					   (int)sizeof(ll.ll_line), ll.ll_line);
 		}
 		if (lseek(fd, (off_t) cxt->pwd->pw_uid * sizeof(ll), SEEK_SET) == -1)
 			goto done;
@@ -792,8 +792,8 @@ static void log_utmp(struct login_context *cxt)
 	 */
 	while ((utp = getutxent()))
 		if (utp->ut_pid == cxt->pid
-		    && utp->ut_type >= INIT_PROCESS
-		    && utp->ut_type <= DEAD_PROCESS)
+			&& utp->ut_type >= INIT_PROCESS
+			&& utp->ut_type <= DEAD_PROCESS)
 			break;
 
 	/* If we can't find a pre-existing entry by pid, try by line.
@@ -808,10 +808,10 @@ static void log_utmp(struct login_context *cxt)
 	/* If we can't find a pre-existing entry by pid and line, try it by id.
 	 * Very stupid telnetd daemons don't set up utmp at all. (kzak) */
 	if (utp == NULL && cxt->tty_number) {
-	     setutxent();
-	     ut.ut_type = DEAD_PROCESS;
-	     strncpy(ut.ut_id, cxt->tty_number, sizeof(ut.ut_id));
-	     utp = getutxid(&ut);
+		 setutxent();
+		 ut.ut_type = DEAD_PROCESS;
+		 strncpy(ut.ut_id, cxt->tty_number, sizeof(ut.ut_id));
+		 utp = getutxid(&ut);
 	}
 
 	if (utp)
@@ -836,7 +836,7 @@ static void log_utmp(struct login_context *cxt)
 		xstrncpy(ut.ut_host, cxt->hostname, sizeof(ut.ut_host));
 		if (*cxt->hostaddress)
 			memcpy(&ut.ut_addr_v6, cxt->hostaddress,
-			       sizeof(ut.ut_addr_v6));
+				   sizeof(ut.ut_addr_v6));
 	}
 
 	pututxline(&ut);
@@ -854,17 +854,17 @@ static void log_syslog(struct login_context *cxt)
 
 	if (!strncmp(cxt->tty_name, "ttyS", 4))
 		syslog(LOG_INFO, _("DIALUP AT %s BY %s"),
-		       cxt->tty_name, pwd->pw_name);
+			   cxt->tty_name, pwd->pw_name);
 
 	if (!pwd->pw_uid) {
 		if (cxt->hostname)
 			syslog(LOG_NOTICE, _("ROOT LOGIN ON %s FROM %s"),
-			       cxt->tty_name, cxt->hostname);
+				   cxt->tty_name, cxt->hostname);
 		else
 			syslog(LOG_NOTICE, _("ROOT LOGIN ON %s"), cxt->tty_name);
 	} else {
-        syslog(LOG_NOTICE, _("NON-ROOT LOGIN ON %s FROM %s using BANGETTY!!"),
-               cxt->tty_name, cxt->hostname);
+		syslog(LOG_NOTICE, _("NON-ROOT LOGIN ON %s FROM %s using BANGETTY!!"),
+			   cxt->tty_name, cxt->hostname);
 	}
 }
 
@@ -990,7 +990,7 @@ static void init_environ(struct login_context *cxt)
 			err(EXIT_FAILURE, _("failed to set the %s environment variable"), "PATH");
 
 	} else if (setenv("PATH", "", 1) != 0 &&
-		       setenv("PATH", _PATH_DEFPATH_ROOT, 1) != 0) {
+			   setenv("PATH", _PATH_DEFPATH_ROOT, 1) != 0) {
 			err(EXIT_FAILURE, _("failed to set the %s environment variable"), "PATH");
 	}
 
@@ -1066,7 +1066,7 @@ void login_now(int argc, char **argv)
 	if (!cxt.pwd) {
 		warnx(_("\nSession setup problem, abort."));
 		syslog(LOG_ERR, _("Invalid user name \"%s\" in %s:%d. Abort."),
-		       cxt.username, __FUNCTION__, __LINE__);
+			   cxt.username, __FUNCTION__, __LINE__);
 		sleepexit(EXIT_FAILURE);
 	}
 
@@ -1083,7 +1083,7 @@ void login_now(int argc, char **argv)
 	 * is used and the machine has network problems.
 	 */
 	retcode = pwd->pw_uid ? initgroups(cxt.username, pwd->pw_gid) :	/* user */
-			        setgroups(0, NULL);			/* root */
+					setgroups(0, NULL);			/* root */
 	if (retcode < 0) {
 		syslog(LOG_ERR, _("groups initialization failed: %m"));
 		warnx(_("\nSession setup problem, abort."));
@@ -1179,7 +1179,7 @@ void login_now(int argc, char **argv)
 
 		tbuf[0] = '-';
 		xstrncpy(tbuf + 1, ((p = strrchr(pwd->pw_shell, '/')) ?
-				    p + 1 : pwd->pw_shell), sizeof(tbuf) - 1);
+					p + 1 : pwd->pw_shell), sizeof(tbuf) - 1);
 
 		childArgv[childArgc++] = pwd->pw_shell;
 		childArgv[childArgc++] = xstrdup(tbuf);
@@ -1237,7 +1237,7 @@ static void parse_args(int argc, char **argv, struct options *op)
 
 	while ((c = getopt_long(argc, argv,
 			   "hv", longopts,
-			    NULL)) != -1) {
+				NULL)) != -1) {
 		switch (c) {
 		case 'v':
 			output_version();
@@ -1260,14 +1260,14 @@ static void parse_args(int argc, char **argv, struct options *op)
 
 	/* On virtual console remember the line which is used for */
 	if (strncmp(op->tty, "tty", 3) == 0 &&
-	    strspn(op->tty + 3, "0123456789") == strlen(op->tty+3))
+		strspn(op->tty + 3, "0123456789") == strlen(op->tty+3))
 		op->vcline = op->tty+3;
 
 #if 0
 	if (argc > optind && argv[optind])
 		op->term = argv[optind];
 #endif
-        op->term = 0; /* XXX hardcoded to 0 for now, Vijo */
+		op->term = 0; /* XXX hardcoded to 0 for now, Vijo */
 
 	debug("exiting parseargs\n");
 }
@@ -1641,7 +1641,7 @@ static void termio_init(struct options *op, struct termios *tp)
 
 	/* Go to blocking input even in local mode. */
 	fcntl(STDIN_FILENO, F_SETFL,
-	      fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
+		  fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 
 	debug("term_io 2\n");
 }
@@ -1661,12 +1661,12 @@ static void reset_vc(const struct options *op, struct termios *tp)
 
 	/* Go to blocking input even in local mode. */
 	fcntl(STDIN_FILENO, F_SETFL,
-	      fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
+		  fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 }
 
 static void print_issue_file(struct options *op, struct termios *tp __attribute__((__unused__)))
 {
-    (void)op;
+	(void)op;
 	/* Issue not in use, start with a new line. */
 	write_all(STDOUT_FILENO, "\r\n", 2);
 }
@@ -1744,7 +1744,7 @@ static void __attribute__((__noreturn__)) usage(void)
 
 	fputs(USAGE_HEADER, out);
 	fprintf(out, _(" %1$s [options] <line> [<baud_rate>,...] [<termtype>]\n"
-		       " %1$s [options] <baud_rate>,... <line> [<termtype>]\n"), program_invocation_short_name);
+			   " %1$s [options] <baud_rate>,... <line> [<termtype>]\n"), program_invocation_short_name);
 
 	fputs(USAGE_SEPARATOR, out);
 	fputs(_("Open a terminal and set its mode.\n"), out);
@@ -1788,28 +1788,6 @@ static void log_warn(const char *fmt, ...)
 	va_start(ap, fmt);
 	//dolog(LOG_WARNING, fmt, ap);
 	va_end(ap);
-}
-
-/*
- * Do not allow the user to pass an option as a user name
- * To be more safe: Use `--' to make sure the rest is
- * interpreted as non-options by the program, if it supports it.
- */
-static void check_username(const char* nm)
-{
-	const char *p = nm;
-	if (!nm)
-		goto err;
-	if (strlen(nm) > 42)
-		goto err;
-	while (isspace(*p))
-		p++;
-	if (*p == '-')
-		goto err;
-	return;
-err:
-	errno = EPERM;
-	log_err(_("checkname failed: %m"));
 }
 
 int main(int argc, char **argv)
@@ -1878,7 +1856,7 @@ int main(int argc, char **argv)
 		 * affects stdout, stdin and stderr as all the file descriptors
 		 * are created by dup().   */
 		fcntl(STDOUT_FILENO, F_SETFL,
-		      fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
+			  fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 
 	/* Set the optional timer. */
 	if (options.timeout)
@@ -1919,9 +1897,6 @@ int main(int argc, char **argv)
 	sigaction(SIGQUIT, &sa_quit, NULL);
 	sigaction(SIGINT, &sa_int, NULL);
 
-	if (username)
-		check_username(username);
-
 	free(options.osrelease);
 #ifdef DEBUGGING
 	if (close_stream(dbf) != 0)
@@ -1932,9 +1907,9 @@ int main(int argc, char **argv)
 	//execv(options.login, login_argv);
 	//log_err(_("%s: can't exec %s: %m"), options.tty, login_argv[0]);
 
-    lui = setup_login_screen();
-    run_ui_loop(lui);
-    teardown_login_screen(lui);
+	lui = setup_login_screen();
+	run_ui_loop(lui);
+	teardown_login_screen(lui);
 
-    login_now(argc, argv);
+	login_now(argc, argv);
 }
