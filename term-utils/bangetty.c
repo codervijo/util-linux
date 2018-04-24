@@ -423,25 +423,6 @@ static void __attribute__ ((__noreturn__)) sleepexit(int eval)
 	exit(eval);
 }
 
-static const char *get_thishost(struct login_context *cxt, const char **domain)
-{
-	if (!cxt->thishost) {
-		cxt->thishost = xgethostname();
-		if (!cxt->thishost) {
-			if (domain)
-				*domain = NULL;
-			return NULL;
-		}
-		cxt->thisdomain = strchr(cxt->thishost, '.');
-		if (cxt->thisdomain)
-			*cxt->thisdomain++ = '\0';
-	}
-
-	if (domain)
-		*domain = cxt->thisdomain;
-	return cxt->thishost;
-}
-
 /*
  * Output the /etc/motd file.
  *
