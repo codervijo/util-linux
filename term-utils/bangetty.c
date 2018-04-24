@@ -129,7 +129,6 @@ static void log_err(const char *, ...) __attribute__((__noreturn__))
 				   __attribute__((__format__(printf, 1, 2)));
 static void log_warn (const char *, ...)
 				__attribute__((__format__(printf, 1, 2)));
-static void check_username (const char* nm);
 static void print_issue_file(struct options *op, struct termios *tp);
 
 #ifdef DEBUGGING
@@ -412,46 +411,6 @@ static int is_consoletty(int fd)
 	return 0;
 }
 #endif
-
-static void __attribute__ ((__noreturn__))
-timedout2(int sig __attribute__ ((__unused__)))
-{
-	struct termios ti;
-
-	/* reset echo */
-	tcgetattr(0, &ti);
-	ti.c_lflag |= ECHO;
-	tcsetattr(0, TCSANOW, &ti);
-	_exit(EXIT_SUCCESS);	/* %% */
-}
-
-static void timedout(int sig __attribute__ ((__unused__)))
-{
-	signal(SIGALRM, timedout2);
-	alarm(10);
-	//ignore_result( write(STDERR_FILENO, timeout_msg, strlen(timeout_msg)) );
-	signal(SIGALRM, SIG_IGN);
-	alarm(0);
-	timedout2(0);
-}
-
-/*
- * This handler allows to inform a shell about signals to login. If you have
- * (root) permissions, you can kill all login children by one signal to the
- * login process.
- *
- * Also, a parent who is session leader is able (before setsid() in the child)
- * to inform the child when the controlling tty goes away (e.g. modem hangup).
- */
-static void sig_handler(int signal)
-{
-	if (child_pid)
-		kill(-child_pid, signal);
-	else
-		got_sig = 1;
-	if (signal == SIGTERM)
-		kill(-child_pid, SIGHUP);	/* because the shell often ignores SIGTERM */
-}
 
 /*
  * Let us delay all exit() calls when the user is not authenticated
@@ -801,7 +760,6 @@ static void fork_session(struct login_context *cxt)
 {
 	struct sigaction sa, oldsa_hup, oldsa_term;
 
-	signal(SIGALRM, SIG_DFL);
 	signal(SIGQUIT, SIG_DFL);
 	signal(SIGTSTP, SIG_IGN);
 
@@ -817,14 +775,6 @@ static void fork_session(struct login_context *cxt)
 	 * The child calls setsid() that detaches from the tty as well.
 	 */
 	ioctl(0, TIOCNOTTY, NULL);
-
-	/*
-	 * We have to beware of SIGTERM, because leaving a PAM session
-	 * without pam_close_session() is a pretty bad thing.
-	 */
-	sa.sa_handler = sig_handler;
-	sigaction(SIGHUP, &sa, NULL);
-	sigaction(SIGTERM, &sa, &oldsa_term);
 
 	closelog();
 
@@ -937,8 +887,6 @@ void login_now(int argc, char **argv)
 	char *childArgv[10];
 	char *buff;
 	int childArgc = 0;
-	int retcode;
-	struct sigaction act;
 	struct passwd *pwd;
 
 	struct login_context cxt = {
@@ -950,10 +898,6 @@ void login_now(int argc, char **argv)
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
 
-	signal(SIGALRM, timedout);
-	(void) sigaction(SIGALRM, NULL, &act);
-	act.sa_flags &= ~SA_RESTART;
-	sigaction(SIGALRM, &act, NULL);
 	signal(SIGQUIT, SIG_IGN);
 	signal(SIGINT, SIG_IGN);
 
@@ -1670,7 +1614,6 @@ static void log_warn(const char *fmt, ...)
 
 int main(int argc, char **argv)
 {
-	char *username = NULL;			/* login name, given to /bin/login */
 	struct chardata chardata;		/* will be set by get_logname() */
 	struct termios termios;			/* terminal mode bits */
 	struct options options = {
