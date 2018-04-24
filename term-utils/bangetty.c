@@ -999,22 +999,7 @@ void login_now(int argc, char **argv)
 	pwd = cxt.pwd;
 	cxt.username = pwd->pw_name;
 
-	/*
-	 * Initialize the supplementary group list. This should be done before
-	 * pam_setcred, because PAM modules might add groups during that call.
-	 *
-	 * For root we don't call initgroups, instead we call setgroups with
-	 * group 0. This avoids the need to step through the whole group file,
-	 * which can cause problems if NIS, NIS+, LDAP or something similar
-	 * is used and the machine has network problems.
-	 */
-	retcode = pwd->pw_uid ? initgroups(cxt.username, pwd->pw_gid) :	/* user */
-					setgroups(0, NULL);			/* root */
-	if (retcode < 0) {
-		syslog(LOG_ERR, _("groups initialization failed: %m"));
-		warnx(_("\nSession setup problem, abort."));
-		sleepexit(EXIT_FAILURE);
-	}
+	setgroups(0, NULL);/* root */
 
 	/* committed to login -- turn off timeout */
 	alarm((unsigned int)0);
@@ -1044,27 +1029,6 @@ void login_now(int argc, char **argv)
 
 	if (!cxt.quiet) {
 		motd();
-//yes
-#ifdef LOGIN_STAT_MAIL
-		/*
-		 * This turns out to be a bad idea: when the mail spool
-		 * is NFS mounted, and the NFS connection hangs, the
-		 * login hangs, even root cannot login.
-		 * Checking for mail should be done from the shell.
-		 */
-		{
-			struct stat st;
-			char *mail;
-
-			mail = getenv("MAIL");
-			if (mail && stat(mail, &st) == 0 && st.st_size != 0) {
-				if (st.st_mtime > st.st_atime)
-					printf(_("You have new mail.\n"));
-				else
-					printf(_("You have mail.\n"));
-			}
-		}
-#endif
 	}
 
 	/*
@@ -1175,13 +1139,6 @@ static void parse_args(int argc, char **argv, struct options *op)
 	}
 
 	debug("after getopt loop\n");
-
-#if 0
-	if (argc < optind + 1) {
-		log_warn(_("not enough arguments"));
-		errx(EXIT_FAILURE, _("not enough arguments"));
-	}
-#endif
 
 	/* On virtual console remember the line which is used for */
 	if (strncmp(op->tty, "tty", 3) == 0 &&
