@@ -83,7 +83,6 @@
 
 struct options {
 	int           flags;			/* toggle switches, see below */
-	unsigned int  timeout;			/* time-out period */
 	char         *tty;			    /* name of tty */
 	char         *vcline;			/* line of virtual console */
 	char         *term;	    		/* terminal type */
@@ -1001,9 +1000,6 @@ void login_now(int argc, char **argv)
 
 	setgroups(0, NULL);/* root */
 
-	/* committed to login -- turn off timeout */
-	alarm((unsigned int)0);
-
 	endpwent();
 
 	cxt.quiet = 0;//get_hushlogin_status(pwd, 1);
@@ -1740,10 +1736,6 @@ int main(int argc, char **argv)
 		fcntl(STDOUT_FILENO, F_SETFL,
 			  fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 
-	/* Set the optional timer. */
-	if (options.timeout)
-		alarm(options.timeout);
-
 	/* Optionally wait for CR or LF before writing /etc/issue */
 	if (serial_tty_option(&options, F_WAITCRLF)) {
 		char ch;
@@ -1763,10 +1755,6 @@ int main(int argc, char **argv)
 	INIT_CHARDATA(&chardata);
 
 	print_issue_file(&options, &termios);
-
-	/* Disable timer. */
-	if (options.timeout)
-		alarm(0);
 
 	if ((options.flags & F_VCONSOLE) == 0) {
 		/* Finalize the termios settings. */
