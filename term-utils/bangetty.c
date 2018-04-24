@@ -122,19 +122,14 @@ static void update_utmp(struct options *op);
 static void open_tty(char *tty, struct termios *tp, struct options *op);
 static void termio_init(struct options *op, struct termios *tp);
 static void reset_vc (const struct options *op, struct termios *tp);
-//static void do_prompt(struct options *op, struct termios *tp);
-//static char *get_logname(struct options *op,
-//			             struct termios *tp, struct chardata *cp);
 static void termio_final(struct options *op,
 						 struct termios *tp, struct chardata *cp);
-//static int caps_lock(char *s);
 static void usage(void) __attribute__((__noreturn__));
 static void exit_slowly(int code) __attribute__((__noreturn__));
 static void log_err(const char *, ...) __attribute__((__noreturn__))
 				   __attribute__((__format__(printf, 1, 2)));
 static void log_warn (const char *, ...)
 				__attribute__((__format__(printf, 1, 2)));
-//static ssize_t append(char *dest, size_t len, const char  *sep, const char *src);
 static void check_username (const char* nm);
 static void print_issue_file(struct options *op, struct termios *tp);
 
@@ -640,75 +635,6 @@ static void init_tty(struct login_context *cxt)
 	tcsetattr(0, TCSAFLUSH, &tt);
 }
 
-
-/*
- * Logs failed login attempts in _PATH_BTMP, if it exists.
- * Must be called only with username the name of an actual user.
- * The most common login failure is to give password instead of username.
- */
-static void log_btmp(struct login_context *cxt)
-{
-	struct utmpx ut;
-	struct timeval tv;
-
-	memset(&ut, 0, sizeof(ut));
-
-	strncpy(ut.ut_user,
-		cxt->username ? cxt->username : "(unknown)",
-		sizeof(ut.ut_user));
-
-	if (cxt->tty_number)
-		strncpy(ut.ut_id, cxt->tty_number, sizeof(ut.ut_id));
-	if (cxt->tty_name)
-		xstrncpy(ut.ut_line, cxt->tty_name, sizeof(ut.ut_line));
-
-	gettimeofday(&tv, NULL);
-	ut.ut_tv.tv_sec = tv.tv_sec;
-	ut.ut_tv.tv_usec = tv.tv_usec;
-
-	ut.ut_type = LOGIN_PROCESS;	/* XXX doesn't matter */
-	ut.ut_pid = cxt->pid;
-
-	if (cxt->hostname) {
-		xstrncpy(ut.ut_host, cxt->hostname, sizeof(ut.ut_host));
-		if (*cxt->hostaddress)
-			memcpy(&ut.ut_addr_v6, cxt->hostaddress,
-				   sizeof(ut.ut_addr_v6));
-	}
-
-	updwtmpx(_PATH_BTMP, &ut);
-}
-
-
-#ifdef HAVE_LIBAUDIT
-static void log_audit(struct login_context *cxt, int status)
-{
-	int audit_fd;
-	struct passwd *pwd = cxt->pwd;
-
-	audit_fd = audit_open();
-	if (audit_fd == -1)
-		return;
-	if (!pwd && cxt->username)
-		pwd = getpwnam(cxt->username);
-
-	audit_log_acct_message(audit_fd,
-				   AUDIT_USER_LOGIN,
-				   NULL,
-				   "login",
-				   cxt->username ? cxt->username : "(unknown)",
-				   pwd ? pwd->pw_uid : (unsigned int) -1,
-				   cxt->hostname,
-				   NULL,
-				   cxt->tty_name,
-				   status);
-
-	close(audit_fd);
-}
-#else				/* !HAVE_LIBAUDIT */
-# define log_audit(cxt, status)
-#endif				/* HAVE_LIBAUDIT */
-
 static void log_lastlog(struct login_context *cxt)
 {
 	struct sigaction sa, oldsa_xfsz;
@@ -1098,7 +1024,6 @@ void login_now(int argc, char **argv)
 	cxt.quiet = 0;//get_hushlogin_status(pwd, 1);
 
 	log_utmp(&cxt);
-	log_audit(&cxt, 1);
 	log_lastlog(&cxt);
 
 	chown_tty(&cxt);
@@ -1829,7 +1754,7 @@ int main(int argc, char **argv)
 	/* Parse command-line arguments. */
 	parse_args(argc, argv, &options);
 
-	/* Update the utmp file. */
+	/* Update the utmp file before login */
 #ifdef	SYSV_STYLE
 	update_utmp(&options);
 #endif
@@ -1911,5 +1836,6 @@ int main(int argc, char **argv)
 	run_ui_loop(lui);
 	teardown_login_screen(lui);
 
+    /* Also updates utmp */
 	login_now(argc, argv);
 }
