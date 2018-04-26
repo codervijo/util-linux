@@ -80,6 +80,7 @@
 #ifdef LOGIN_PROCESS
 #  define SYSV_STYLE
 #endif
+#define DEBUGGING 1
 
 struct options {
 	int           flags;			/* toggle switches, see below */
@@ -178,30 +179,28 @@ FILE *dbf;
 #define FORM_SUBWIN_START_COL          (START_TEXT_COL-2)
 
 #define MENU_WINDOW_HEIGHT                              2
-#define MENU_WINDOW_WIDTH                              15
+#define MENU_WINDOW_WIDTH                              70
 #define MENU_WINDOW_START_ROW             (OPTIONS_ROW-1)
 #define MENU_WINDOW_START_COL                          27
 
-#define DONE_TEXT                                  "Done"
-#define CANCEL_TEXT                              "Cancel"
+#define DONE_TEXT                         "Start Install"
+#define CANCEL_TEXT                       "Exit To Shell"
 
 typedef struct login_ui_s {
 	int      numitems;
-	FORM    *iform;
 	ITEM   **itms;
 	MENU    *menu;
 	WINDOW  *bodywin;
-	WINDOW  *formwin;
 	WINDOW  *menuwin;
 } login_ui_t;
 
-login_ui_t *setup_login_screen(void);
+login_ui_t *setup_first_screen(void);
 int button_handle(login_ui_t *lui, ITEM *item);
 void run_ui_loop(login_ui_t *lui);
-int teardown_login_screen(login_ui_t *lui);
+int teardown_first_screen(login_ui_t *lui);
 void login_now(int argc, char **argv);
 
-login_ui_t *setup_login_screen(void)
+login_ui_t *setup_first_screen(void)
 {
 	login_ui_t *lui;
 	//WINDOW *tmpw1;
@@ -221,20 +220,15 @@ login_ui_t *setup_login_screen(void)
 	lui->numitems  = NUM_ITEMS;
 	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
 	assert(lui->bodywin != NULL);
-	lui->formwin = derwin(lui->bodywin, FORM_WINDOW_HEIGHT, FORM_WINDOW_WIDTH, FORM_WINDOW_START_ROW, FORM_WINDOW_START_COL);
-	assert(lui->formwin != NULL);
 	//box(lui->formwin, 0, 0);
 	//lui->menuwin = newwin(2, 12, MENU_ROW, 30);
 	lui->menuwin = derwin(lui->bodywin, MENU_WINDOW_HEIGHT, MENU_WINDOW_WIDTH, MENU_WINDOW_START_ROW, MENU_WINDOW_START_COL);
 	assert(lui->menuwin != NULL);
-	//box(lui->menuwin, 0, 0);
+	box(lui->menuwin, 0, 0);
 	//lui->menuwin = newwin(2, 12, MENU_ROW, 30);
-	set_form_win(lui->iform, lui->formwin);
 	//tmpw1 = derwin(lui->formwin, 10, 40, USER_ROW-1, START_TEXT_COL-2);
 	//box(tmpw1, 0, 0);
 	//set_form_sub(lui->iform, tmpw1);
-	set_form_sub(lui->iform, derwin(lui->formwin, FORM_SUBWIN_WIDTH, FORM_SUBWIN_HEIGHT, FORM_SUBWIN_START_ROW, FORM_SUBWIN_START_COL));
-	post_form(lui->iform);
 	//refresh();
 	
 	lui->itms = (ITEM **)calloc(lui->numitems, sizeof(ITEM *));
@@ -257,7 +251,6 @@ login_ui_t *setup_login_screen(void)
 
 	//form_driver (lui->iform, REQ_CLR_FIELD);
 
-	form_driver (lui->iform, REQ_CLR_FIELD);
 
 	post_menu(lui->menu);
 	//refresh();
@@ -272,11 +265,11 @@ int button_handle(login_ui_t *lui, ITEM *item)
 	 const char *name = item_name(item);
 
 	 if (strcmp(name, DONE_TEXT) == 0) {
-		printf("Should exit now, but dont know how\n");
+		debug("Should exit now, trying...\n");
 		sleep(10);
-		return 1;
+                return 1;
 	 } else if (strcmp(name, CANCEL_TEXT) == 0) {
-		printf("Cancel..cancel..cancel\n");
+		debug("Cancel..cancel..cancel\n");
 	 } else {
 		exit(1);
 	 }
@@ -290,20 +283,14 @@ void run_ui_loop(login_ui_t *lui)
 	int stop = 0;
 	int domenu = 0;
 
-	keypad(lui->formwin, true);
 	curs_set(1);
 	cy = USER_ROW;
 	cx = START_INPUT_COL;
-	wmove(lui->formwin, cy, cx);
-	wrefresh(lui->formwin);
 	/* Loop through to get user requests */
-	while (stop != 1 && (ch = wgetch(lui->formwin)) != KEY_ENTER)
+	while (stop != 1 && (ch = wgetch(lui->menuwin)) != KEY_ENTER)
 	{
 		//printf("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
 			switch(ch) {
-			case KEY_UP:
-				domenu = 0;
-				break;
 			case KEY_LEFT:
 				menu_driver(lui->menu, REQ_LEFT_ITEM);
 				break;
@@ -320,21 +307,19 @@ void run_ui_loop(login_ui_t *lui)
 			wrefresh(lui->bodywin);
 			wrefresh(lui->menuwin);
 	}
+        debug("Returning from ui_loop\n");
 
 }
 
-int teardown_login_screen(login_ui_t *lui)
+int teardown_first_screen(login_ui_t *lui)
 {
 	/* Un post form and free the memory */
-	unpost_form(lui->iform);
-	free_form(lui->iform);
 
 	for (int i = 0; i < lui->numitems; i++)
 		free_item(lui->itms[i]);
 
 	free_menu(lui->menu);
 
-	delwin(lui->formwin);
 	delwin(lui->menuwin);
 	delwin(lui->bodywin);
 
@@ -350,9 +335,9 @@ int teardown_login_screen(login_ui_t *lui)
 {
 	login_ui_t *lui;
 
-	lui = setup_login_screen();
+	lui = setup_first_screen();
 	run_ui_loop(lui);
-	teardown_login_screen(lui);
+	teardown_first_screen(lui);
 }*/
 
 #ifdef USE_TTY_GROUP
@@ -370,10 +355,10 @@ int teardown_login_screen(login_ui_t *lui)
 struct login_context {
 	const char	    *tty_path;	           /* ttyname() return value */
 	const char	    *tty_name;	           /* tty_path without /dev prefix */
-	const char	    *tty_number;	       /* end of the tty_path */
+	const char	    *tty_number;	   /* end of the tty_path */
 	mode_t		     tty_mode;	           /* chmod() mode */
 	char		    *username;	           /* from command line or PAM */
-	struct passwd	*pwd;		           /* user info */
+	struct passwd		*pwd;	           /* user info */
 	char		    *pwdbuf;	           /* pwd strings */
 
 #ifdef LOGIN_CHOWN_VCS
@@ -383,11 +368,11 @@ struct login_context {
 
 	char		    *hostname;		       /* remote machine */
 	char		     hostaddress[16];	   /* remote address */
-	char		    *thishost;	           /* this machine */
-	char		    *thisdomain;           /* this machine's domain */
+	//char		    *thishost;	           /* this machine */
+	//char		    *thisdomain;           /* this machine's domain */
 	pid_t		     pid;
-	int		         quiet;		           /* 1 if hush file exists */
-	int              noauth;
+	int		     quiet;		           /* 1 if hush file exists */
+	int		     noauth;
 };
 
 /*
@@ -875,28 +860,25 @@ void login_now(int argc, char **argv)
 		.pid = getpid(),		  /* PID */
 	};
 
-	setlocale(LC_ALL, "");
-	bindtextdomain(PACKAGE, LOCALEDIR);
-	textdomain(PACKAGE);
-
+debug("inside login_now");
 	signal(SIGQUIT, SIG_IGN);
 	signal(SIGINT, SIG_IGN);
 
 	setpriority(PRIO_PROCESS, 0, 0);
 	initproctitle(argc, argv);
 
-	if (*argv) {
-		char *p = *argv;
-		cxt.username = xstrdup(p);
+debug("setting username to root");
+        cxt.username = malloc(10); /* XXX free, or better way to set it */
+        memset(cxt.username, 0, 10);
+	strcpy(cxt.username, "root");
+debug("set username to root");
+sleep(10);
 
-		/* Wipe the name - some people mistype their password here. */
-		/* (Of course we are too late, but perhaps this helps a little...) */
-		while (*p)
-			*p++ = ' ';
-	}
-
-	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--)
+#if 0
+	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
 		close(cnt);
+#endif
+debug("before setpgrp");
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
 	init_tty(&cxt);
@@ -921,7 +903,8 @@ void login_now(int argc, char **argv)
 	}
 
 	pwd = cxt.pwd;
-	cxt.username = pwd->pw_name;
+	//cxt.username = pwd->pw_name;
+debug("set username cxt.username\n");
 
 	setgroups(0, NULL);/* root */
 
@@ -957,6 +940,7 @@ void login_now(int argc, char **argv)
 	 * and reinitialize syslog stuff.
 	 */
 	fork_session(&cxt);
+debug("fork done\n");
 
 	/* discard permissions last so we can't get killed and drop core */
 	if (setuid(pwd->pw_uid) < 0 && pwd->pw_uid) {
@@ -1692,19 +1676,20 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &sa_int, NULL);
 
 	free(options.osrelease);
-#ifdef DEBUGGING
-	if (close_stream(dbf) != 0)
-		log_err("write failed: %s", DEBUG_OUTPUT);
-#endif
 
 	/* Let the login program take care of password validation. */
 	//execv(options.login, login_argv);
 	//log_err(_("%s: can't exec %s: %m"), options.tty, login_argv[0]);
 
-	lui = setup_login_screen();
+	lui = setup_first_screen();
 	run_ui_loop(lui);
-	teardown_login_screen(lui);
+	teardown_first_screen(lui);
+        debug("Tore down UI screen, next login_now()\n");
 
-    /* Also updates utmp */
+	/* Also updates utmp */
 	login_now(argc, argv);
+#ifdef DEBUGGING
+	if (close_stream(dbf) != 0)
+		log_err("write failed: %s", DEBUG_OUTPUT);
+#endif
 }
