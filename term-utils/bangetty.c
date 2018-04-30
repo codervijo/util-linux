@@ -810,8 +810,6 @@ static void init_environ(struct login_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
 	char *termenv;
-	char tmp[PATH_MAX];
-	int len;
 
 	termenv = getenv("TERM");
 	if (termenv)
@@ -835,11 +833,6 @@ static void init_environ(struct login_context *cxt)
 			err(EXIT_FAILURE, _("failed to set the %s environment variable"), "PATH");
 	}
 
-	/* mailx will give a funny error msg if you forget this one */
-	len = snprintf(tmp, sizeof(tmp), "%s/%s", _PATH_MAILDIR, pwd->pw_name);
-	if (len > 0 && (size_t) len < sizeof(tmp))
-		xsetenv("MAIL", tmp, 0);
-
 	/* LOGNAME is not documented in login(1) but HP-UX 6.5 does it. We'll
 	 * not allow modifying it.
 	 */
@@ -849,7 +842,6 @@ static void init_environ(struct login_context *cxt)
 
 void login_now(int argc, char **argv)
 {
-	int cnt;
 	char *childArgv[10];
 	char *buff;
 	int childArgc = 0;
@@ -888,12 +880,6 @@ debug("before setpgrp");
 	/* the user has already been authenticated */
 	cxt.noauth = getuid() == 0 ? 1 : 0;
 
-	/*
-	 * Authentication may be skipped (for example, during krlogin, rlogin,
-	 * etc...), but it doesn't mean that we can skip other account checks.
-	 * The account could be disabled or the password has expired (although
-	 * the kerberos ticket is valid).      -- kzak@redhat.com (22-Feb-2006)
-	 */
 	cxt.pwd = xgetpwnam(cxt.username, &cxt.pwdbuf);
 	if (!cxt.pwd) {
 		warnx(_("\nSession setup problem, abort."));
@@ -1021,11 +1007,10 @@ static void parse_args(int argc, char **argv, struct options *op)
 	enum {
 		VERSION_OPTION = CHAR_MAX + 1,
 		HELP_OPTION,
-		RELOAD_OPTION,
 	};
 	const struct option longopts[] = {
 		{  "version",	     no_argument,	     NULL,  'v'  },
-		{  "help",	         no_argument,	     NULL,  'h'     },
+		{  "help",	         no_argument,	     NULL,  'h'  },
 		{ NULL, 0, NULL, 0 }
 	};
 
