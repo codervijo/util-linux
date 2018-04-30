@@ -357,7 +357,6 @@ struct login_context {
 	char		    *username;	           /* from command line or PAM */
 	struct passwd   *pwd;	               /* user info */
 	char		    *pwdbuf;	           /* pwd strings */
-	char		    *hostname;		       /* remote machine */
 	pid_t		     pid;
 	int		         quiet;		           /* 1 if hush file exists */
 	int		         noauth;
@@ -559,8 +558,6 @@ static void log_lastlog(struct login_context *cxt)
 
 	if (cxt->tty_name)
 		xstrncpy(ll.ll_line, cxt->tty_name, sizeof(ll.ll_line));
-	if (cxt->hostname)
-		xstrncpy(ll.ll_host, cxt->hostname, sizeof(ll.ll_host));
 
 	if (write_all(fd, (char *)&ll, sizeof(ll)))
 		warn(_("write lastlog failed"));
@@ -633,9 +630,6 @@ static void log_utmp(struct login_context *cxt)
 	ut.ut_tv.tv_usec = tv.tv_usec;
 	ut.ut_type = USER_PROCESS;
 	ut.ut_pid = cxt->pid;
-	if (cxt->hostname) {
-		xstrncpy(ut.ut_host, cxt->hostname, sizeof(ut.ut_host));;
-	}
 
 	pututxline(&ut);
 	endutxent();
@@ -655,14 +649,10 @@ static void log_syslog(struct login_context *cxt)
 			   cxt->tty_name, pwd->pw_name);
 
 	if (!pwd->pw_uid) {
-		if (cxt->hostname)
-			syslog(LOG_NOTICE, _("ROOT LOGIN ON %s FROM %s"),
-				   cxt->tty_name, cxt->hostname);
-		else
-			syslog(LOG_NOTICE, _("ROOT LOGIN ON %s"), cxt->tty_name);
+		syslog(LOG_NOTICE, _("ROOT LOGIN ON %s"), cxt->tty_name);
 	} else {
-		syslog(LOG_NOTICE, _("NON-ROOT LOGIN ON %s FROM %s using BANGETTY!!"),
-			   cxt->tty_name, cxt->hostname);
+		syslog(LOG_NOTICE, _("NON-ROOT LOGIN ON %s using BANGETTY!!"),
+			   cxt->tty_name);
 	}
 }
 
