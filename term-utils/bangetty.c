@@ -195,7 +195,7 @@ typedef struct login_ui_s {
 } login_ui_t;
 
 login_ui_t *setup_first_screen(void);
-int button_handle(login_ui_t *lui, ITEM *item);
+int button_handle(ITEM *item);
 void run_ui_loop(login_ui_t *lui);
 int teardown_first_screen(login_ui_t *lui);
 void login_now(int argc, char **argv);
@@ -260,7 +260,7 @@ login_ui_t *setup_first_screen(void)
 	return lui;
 }
 
-int button_handle(login_ui_t *lui, ITEM *item)
+int button_handle(ITEM *item)
 {
 	 const char *name = item_name(item);
 
@@ -279,36 +279,32 @@ int button_handle(login_ui_t *lui, ITEM *item)
 
 void run_ui_loop(login_ui_t *lui)
 {
-	int ch, cy, cx;
+	int ch;
 	int stop = 0;
-	int domenu = 0;
 
 	curs_set(1);
-	cy = USER_ROW;
-	cx = START_INPUT_COL;
 	/* Loop through to get user requests */
 	while (stop != 1 && (ch = wgetch(lui->menuwin)) != KEY_ENTER)
 	{
 		//printf("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
-			switch(ch) {
-			case KEY_LEFT:
-				menu_driver(lui->menu, REQ_LEFT_ITEM);
-				break;
-			case KEY_RIGHT:
-				menu_driver(lui->menu, REQ_RIGHT_ITEM);
-				break;
-			case 10:
-				if (button_handle(lui, current_item(lui->menu)) == 1) {
-					 stop = 1;
-					 break;
-				}
+		switch(ch) {
+		case KEY_LEFT:
+			menu_driver(lui->menu, REQ_LEFT_ITEM);
+			break;
+		case KEY_RIGHT:
+			menu_driver(lui->menu, REQ_RIGHT_ITEM);
+			break;
+		case 10:
+			if (button_handle(current_item(lui->menu)) == 1) {
+			    stop = 1;
+			    break;
 			}
-			//refresh();
-			wrefresh(lui->bodywin);
-			wrefresh(lui->menuwin);
+		}
+		//refresh();
+		wrefresh(lui->bodywin);
+		wrefresh(lui->menuwin);
 	}
-        debug("Returning from ui_loop\n");
-
+	debug("Returning from ui_loop\n");
 }
 
 int teardown_first_screen(login_ui_t *lui)
@@ -346,8 +342,9 @@ int teardown_first_screen(login_ui_t *lui)
 # define TTY_MODE 0600
 #endif
 
-#define	TTYGRPNAME	"tty"	/* name of group to own ttys */
-#define VCS_PATH_MAX	64
+#define	TTYGRPNAME	     "tty"	/* name of group to own ttys */
+#define VCS_PATH_MAX   	   64
+#define PRG_NAME       "getty"
 
 /*
  * Login control struct
@@ -355,7 +352,7 @@ int teardown_first_screen(login_ui_t *lui)
 struct login_context {
 	const char	    *tty_path;	           /* ttyname() return value */
 	const char	    *tty_name;	           /* tty_path without /dev prefix */
-	const char	    *tty_number;	   /* end of the tty_path */
+	const char	    *tty_number;	       /* end of the tty_path */
 	mode_t		     tty_mode;	           /* chmod() mode */
 	char		    *username;	           /* from command line or PAM */
 	struct passwd		*pwd;	           /* user info */
@@ -371,7 +368,7 @@ struct login_context {
 	//char		    *thishost;	           /* this machine */
 	//char		    *thisdomain;           /* this machine's domain */
 	pid_t		     pid;
-	int		     quiet;		           /* 1 if hush file exists */
+	int		     quiet;		               /* 1 if hush file exists */
 	int		     noauth;
 };
 
@@ -770,7 +767,7 @@ static void fork_session(struct login_context *cxt)
 
 		/* wait as long as any child is there */
 		while (wait(NULL) == -1 && errno == EINTR) ;
-		openlog("login", LOG_ODELAY, LOG_AUTHPRIV);
+		openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
 		exit(EXIT_SUCCESS);
 	}
 
@@ -793,7 +790,7 @@ static void fork_session(struct login_context *cxt)
 
 	/* make sure we have a controlling tty */
 	//open_tty(cxt->tty_path);
-	openlog("login", LOG_ODELAY, LOG_AUTHPRIV);	/* reopen */
+	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);	/* reopen */
 
 	/*
 	 * TIOCSCTTY: steal tty from other process group.
@@ -860,8 +857,8 @@ debug("inside login_now");
 	initproctitle(argc, argv);
 
 debug("setting username to root");
-        cxt.username = malloc(10); /* XXX free, or better way to set it */
-        memset(cxt.username, 0, 10);
+    cxt.username = malloc(10); /* XXX free, or better way to set it */
+    memset(cxt.username, 0, 10);
 	strcpy(cxt.username, "root");
 debug("set username to root");
 sleep(10);
@@ -870,12 +867,12 @@ sleep(10);
 	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
 		close(cnt);
 #endif
-debug("before setpgrp");
+    debug("before setpgrp");
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
 	init_tty(&cxt);
 
-	openlog("login", LOG_ODELAY, LOG_AUTHPRIV);
+	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
 
 	/* the user has already been authenticated */
 	cxt.noauth = getuid() == 0 ? 1 : 0;
@@ -890,7 +887,7 @@ debug("before setpgrp");
 
 	pwd = cxt.pwd;
 	//cxt.username = pwd->pw_name;
-debug("set username cxt.username\n");
+    debug("set username cxt.username\n");
 
 	setgroups(0, NULL);/* root */
 
@@ -913,7 +910,7 @@ debug("set username cxt.username\n");
 
 	init_environ(&cxt);		/* init $HOME, $TERM ... */
 
-	setproctitle("login", cxt.username);
+	setproctitle(PRG_NAME, cxt.username);
 
 	log_syslog(&cxt);
 
