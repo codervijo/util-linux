@@ -178,7 +178,7 @@ FILE *dbf;
 #define FORM_SUBWIN_START_ROW                (USER_ROW-1)
 #define FORM_SUBWIN_START_COL          (START_TEXT_COL-2)
 
-#define MENU_WINDOW_HEIGHT                              2
+#define MENU_WINDOW_HEIGHT                             5
 #define MENU_WINDOW_WIDTH                              70
 #define MENU_WINDOW_START_ROW             (OPTIONS_ROW-1)
 #define MENU_WINDOW_START_COL                          27
@@ -244,9 +244,9 @@ login_ui_t *setup_first_screen(void)
 	lui->menu = new_menu((ITEM **)lui->itms);
 	assert(lui->menu != NULL);
 	menu_opts_off(lui->menu, O_SHOWDESC);
-	menu_opts_on(lui->menu, O_ROWMAJOR);
+	menu_opts_off(lui->menu, O_ROWMAJOR);
 	set_menu_win(lui->menu, lui->menuwin);
-	set_menu_format(lui->menu, 1, 20);
+	set_menu_format(lui->menu, 2, 0);
 	set_menu_mark(lui->menu, "");
 
 	//form_driver (lui->iform, REQ_CLR_FIELD);
@@ -288,11 +288,11 @@ void run_ui_loop(login_ui_t *lui)
 	{
 		//printf("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
 		switch(ch) {
-		case KEY_LEFT:
-			menu_driver(lui->menu, REQ_LEFT_ITEM);
+		case KEY_DOWN:
+			menu_driver(lui->menu, REQ_NEXT_ITEM);
 			break;
-		case KEY_RIGHT:
-			menu_driver(lui->menu, REQ_RIGHT_ITEM);
+		case KEY_UP:
+			menu_driver(lui->menu, REQ_PREV_ITEM);
 			break;
 		case 10:
 			if (button_handle(current_item(lui->menu)) == 1) {
@@ -818,6 +818,7 @@ sleep(10);
 	/* the user has already been authenticated */
 	cxt.noauth = getuid() == 0 ? 1 : 0;
 
+    debug("before xgetpwnam");
 	cxt.pwd = xgetpwnam(cxt.username, &cxt.pwdbuf);
 	if (!cxt.pwd) {
 		warnx(_("\nSession setup problem, abort."));
