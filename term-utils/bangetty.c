@@ -342,9 +342,9 @@ int teardown_first_screen(login_ui_t *lui)
 # define TTY_MODE 0600
 #endif
 
-#define	TTYGRPNAME	     "tty"	/* name of group to own ttys */
-#define VCS_PATH_MAX   	   64
-#define PRG_NAME       "getty"
+#define	TTYGRPNAME	     	"tty"	/* name of group to own ttys */
+#define VCS_PATH_MAX		  64
+#define PRG_NAME       "bangetty"
 
 /*
  * Login control struct
@@ -355,21 +355,12 @@ struct login_context {
 	const char	    *tty_number;	       /* end of the tty_path */
 	mode_t		     tty_mode;	           /* chmod() mode */
 	char		    *username;	           /* from command line or PAM */
-	struct passwd		*pwd;	           /* user info */
+	struct passwd   *pwd;	               /* user info */
 	char		    *pwdbuf;	           /* pwd strings */
-
-#ifdef LOGIN_CHOWN_VCS
-	char		     vcsn[VCS_PATH_MAX];   /* virtual console name */
-	char		     vcsan[VCS_PATH_MAX];
-#endif
-
 	char		    *hostname;		       /* remote machine */
-	char		     hostaddress[16];	   /* remote address */
-	//char		    *thishost;	           /* this machine */
-	//char		    *thisdomain;           /* this machine's domain */
 	pid_t		     pid;
-	int		     quiet;		               /* 1 if hush file exists */
-	int		     noauth;
+	int		         quiet;		           /* 1 if hush file exists */
+	int		         noauth;
 };
 
 /*
@@ -378,21 +369,6 @@ struct login_context {
  */
 static int child_pid = 0;
 static volatile int got_sig = 0;
-
-#ifdef LOGIN_CHOWN_VCS
-/* true if the filedescriptor fd is a console tty, very Linux specific */
-static int is_consoletty(int fd)
-{
-	struct stat stb;
-
-	if ((fstat(fd, &stb) >= 0)
-		&& (major(stb.st_rdev) == TTY_MAJOR)
-		&& (minor(stb.st_rdev) < 64)) {
-		return 1;
-	}
-	return 0;
-}
-#endif
 
 /*
  * Let us delay all exit() calls when the user is not authenticated
@@ -468,20 +444,6 @@ static void chown_tty(struct login_context *cxt)
 		chown_err(cxt->tty_name, uid, gid);
 	if (fchmod(0, cxt->tty_mode))
 		chmod_err(cxt->tty_name, cxt->tty_mode);
-
-#ifdef LOGIN_CHOWN_VCS
-	if (is_consoletty(0)) {
-		if (chown(cxt->vcsn, uid, gid))			/* vcs */
-			chown_err(cxt->vcsn, uid, gid);
-		if (chmod(cxt->vcsn, cxt->tty_mode))
-			chmod_err(cxt->vcsn, cxt->tty_mode);
-
-		if (chown(cxt->vcsan, uid, gid))		/* vcsa */
-			chown_err(cxt->vcsan, uid, gid);
-		if (chmod(cxt->vcsan, cxt->tty_mode))
-			chmod_err(cxt->vcsan, cxt->tty_mode);
-	}
-#endif
 }
 
 /*
@@ -514,14 +476,6 @@ static void init_tty(struct login_context *cxt)
 		syslog(LOG_ERR, _("FATAL: bad tty"));
 		sleepexit(EXIT_FAILURE);
 	}
-
-#ifdef LOGIN_CHOWN_VCS
-	if (cxt->tty_number) {
-		/* find names of Virtual Console devices, for later mode change */
-		snprintf(cxt->vcsn, sizeof(cxt->vcsn), "/dev/vcs%s", cxt->tty_number);
-		snprintf(cxt->vcsan, sizeof(cxt->vcsan), "/dev/vcsa%s", cxt->tty_number);
-	}
-#endif
 
 	tcgetattr(0, &tt);
 	ttt = tt;
@@ -680,10 +634,7 @@ static void log_utmp(struct login_context *cxt)
 	ut.ut_type = USER_PROCESS;
 	ut.ut_pid = cxt->pid;
 	if (cxt->hostname) {
-		xstrncpy(ut.ut_host, cxt->hostname, sizeof(ut.ut_host));
-		if (*cxt->hostaddress)
-			memcpy(&ut.ut_addr_v6, cxt->hostaddress,
-				   sizeof(ut.ut_addr_v6));
+		xstrncpy(ut.ut_host, cxt->hostname, sizeof(ut.ut_host));;
 	}
 
 	pututxline(&ut);
