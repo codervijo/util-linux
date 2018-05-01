@@ -140,9 +140,9 @@ FILE *dbf;
 #define DEFAULT_WINDOW_START_ROW                        0
 #define DEFAULT_WINDOW_START_COL                        0
 #define MENU_WINDOW_HEIGHT                              5
-#define MENU_WINDOW_WIDTH                              70
+#define MENU_WINDOW_WIDTH                              20
 #define MENU_WINDOW_START_ROW                          14
-#define MENU_WINDOW_START_COL                          27
+#define MENU_WINDOW_START_COL                    (COLS/2)-10
 
 #define DONE_TEXT                         "Start Install"
 #define CANCEL_TEXT                       "Exit To Shell"
@@ -183,12 +183,12 @@ login_ui_t *setup_first_screen(void)
 
 	lui->menuwin = derwin(lui->bodywin, MENU_WINDOW_HEIGHT, MENU_WINDOW_WIDTH, MENU_WINDOW_START_ROW, MENU_WINDOW_START_COL);
 	assert(lui->menuwin != NULL);
-	box(lui->menuwin, 0, 0);
+	//box(lui->menuwin, 0, 0);
 	
 	lui->itms = (ITEM **)calloc(lui->numitems, sizeof(ITEM *));
 	assert(lui->itms != NULL);
-	lui->itms[0] = new_item(CANCEL_TEXT, CANCEL_TEXT);
-	lui->itms[1] = new_item(DONE_TEXT, DONE_TEXT);
+	lui->itms[0] = new_item(DONE_TEXT, DONE_TEXT);
+	lui->itms[1] = new_item(CANCEL_TEXT, CANCEL_TEXT);
 	lui->itms[2] = (ITEM*)NULL;
 	assert(lui->itms[0] != NULL);
 	assert(lui->itms[1] != NULL);
@@ -375,11 +375,9 @@ static void chown_tty(struct ban_context *cxt)
  */
 static void init_tty(struct ban_context *cxt)
 {
-	char *ttymodestr;
 	struct stat st;
 	struct termios tt, ttt;
 
-	//get_terminal_name(&cxt->tty_path, &cxt->tty_name, &cxt->tty_number);
         cxt->tty_path   = xmalloc(strlen("/dev/tty1"));
 	xstrncpy(cxt->tty_path, "/dev/tty1", sizeof("/dev/tty1"));
         cxt->tty_name   = cxt->tty_path + 3;
