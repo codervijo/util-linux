@@ -95,7 +95,6 @@ struct ban_context {
 
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
 #define F_VCONSOLE	   (1<<12)	/* This is a virtual console */
-#define F_HANGUP	   (1<<13)	/* Do call vhangup(2) */
 
 #define serial_tty_option(opt, flag)	\
 	(((opt)->flags & (F_VCONSOLE|(flag))) == (flag))
@@ -1000,25 +999,8 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 		close(STDIN_FILENO);
 		errno = 0;
 
-		if (op->flags & F_HANGUP) {
 
-			if (ioctl(fd, TIOCNOTTY))
-				debug("TIOCNOTTY ioctl failed\n");
-
-			/*
-			 * Let's close all file descriptors before vhangup
-			 * https://lkml.org/lkml/2012/6/5/145
-			 */
-			close(fd);
-			close(STDOUT_FILENO);
-			close(STDERR_FILENO);
-			errno = 0;
-			closed = 1;
-
-			if (vhangup())
-				log_err(_("/dev/%s: vhangup() failed: %m"), tty);
-		} else
-			close(fd);
+		close(fd);
 
 		debug("open(2)\n");
 		if (open(buf, O_RDWR|O_NOCTTY|O_NONBLOCK, 0) != 0)
