@@ -106,15 +106,7 @@ struct ban_context {
 	char            *tty;			    /* name of tty */
 	char            *vcline;			/* line of virtual console */
 	char            *term;	    		/* terminal type */
-	int              clocal;			/* CLOCAL_MODE_* */
 };
-
-enum {
-	CLOCAL_MODE_AUTO = 0,
-	CLOCAL_MODE_ALWAYS,
-	CLOCAL_MODE_NEVER
-};
-
 
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
 #define F_VCONSOLE	   (1<<12)	/* This is a virtual console */
@@ -1208,7 +1200,7 @@ static void termio_init(struct ban_context *op, struct termios *tp)
 	tp->c_oflag &= OPOST | ONLCR;
 
 	if ((op->flags & F_KEEPCFLAGS) == 0)
-		tp->c_cflag = CS8 | HUPCL | CREAD | (tp->c_cflag & CLOCAL);
+		tp->c_cflag = CS8 | HUPCL | CREAD;
 
 	/*
 	 * Note that the speed is stored in the c_cflag termios field, so we have
@@ -1216,19 +1208,6 @@ static void termio_init(struct ban_context *op, struct termios *tp)
 	 */
 	cfsetispeed(tp, ispeed);
 	cfsetospeed(tp, ospeed);
-
-	/* The default is to follow setting from kernel, but it's possible
-	 * to explicitly remove/add CLOCAL flag by -L[=<mode>]*/
-	switch (op->clocal) {
-	case CLOCAL_MODE_ALWAYS:
-		tp->c_cflag |= CLOCAL;		/* -L or -L=always */
-		break;
-	case CLOCAL_MODE_NEVER:
-		tp->c_cflag &= ~CLOCAL;		/* -L=never */
-		break;
-	case CLOCAL_MODE_AUTO:			/* -L=auto */
-		break;
-	}
 
 #ifdef HAVE_STRUCT_TERMIOS_C_LINE
 	tp->c_line = 0;
@@ -1456,7 +1435,7 @@ int main(int argc, char **argv)
 	debug("calling termio_init\n");
 	termio_init(&options, &termios);
 
-	if (options.flags & F_VCONSOLE || options.clocal != CLOCAL_MODE_ALWAYS)
+	if (options.flags & F_VCONSOLE)
 		/* Go to blocking mode unless -L is specified, this change
 		 * affects stdout, stdin and stderr as all the file descriptors
 		 * are created by dup().   */
