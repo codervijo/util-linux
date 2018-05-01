@@ -84,7 +84,6 @@ struct options {
 	char         *vcline;			/* line of virtual console */
 	char         *term;	    		/* terminal type */
 	int           clocal;			/* CLOCAL_MODE_* */
-	int           kbmode;			/* Keyboard mode if virtual console */
 };
 
 enum {
@@ -966,7 +965,7 @@ static void parse_args(int argc, char **argv, struct options *op)
 	if (argc > optind && argv[optind])
 		op->term = argv[optind];
 #endif
-		op->term = 0; /* XXX hardcoded to 0 for now, Vijo */
+		op->term = 0; /* XXX hardcoded to 0 for now, Vijo */ /* FIXME wrong setting */
 
 	debug("exiting parseargs\n");
 }
