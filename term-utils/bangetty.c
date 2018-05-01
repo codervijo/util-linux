@@ -104,7 +104,6 @@ struct ban_context {
 	int		         noauth;
 	int              flags;			/* toggle switches, see below */
 	char            *tty;			    /* name of tty */
-	char            *vcline;			/* line of virtual console */
 	char            *term;	    		/* terminal type */
 };
 
@@ -934,11 +933,6 @@ static void parse_args(int argc, char **argv, struct ban_context *op)
 
 	debug("after getopt loop\n");
 
-	/* On virtual console remember the line which is used for */
-	if (strncmp(op->tty, "tty", 3) == 0 &&
-		strspn(op->tty + 3, "0123456789") == strlen(op->tty+3))
-		op->vcline = op->tty+3;
-
 #if 0
 	if (argc > optind && argv[optind])
 		op->term = argv[optind];
@@ -957,7 +951,6 @@ static void update_utmp(struct ban_context *op)
 	time_t t;
 	pid_t pid = getpid();
 	pid_t sid = getsid(0);
-	char *vcline = op->vcline;
 	char *line   = op->tty;
 	struct utmpx *utp;
 
@@ -990,20 +983,16 @@ static void update_utmp(struct ban_context *op)
 	if (utp) {
 		memcpy(&ut, utp, sizeof(ut));
 	} else {
+		char * ptr;
+
 		/* Some inits do not initialize utmp. */
 		memset(&ut, 0, sizeof(ut));
-		if (vcline && *vcline)
-			/* Standard virtual console devices */
-			strncpy(ut.ut_id, vcline, sizeof(ut.ut_id));
-		else {
-			size_t len = strlen(line);
-			char * ptr;
-			if (len >= sizeof(ut.ut_id))
-				ptr = line + len - sizeof(ut.ut_id);
-			else
-				ptr = line;
-			strncpy(ut.ut_id, ptr, sizeof(ut.ut_id));
-		}
+		size_t len = strlen(line);
+		if (len >= sizeof(ut.ut_id))
+			ptr = line + len - sizeof(ut.ut_id);
+		else
+			ptr = line;
+		strncpy(ut.ut_id, ptr, sizeof(ut.ut_id));
 	}
 
 	strncpy(ut.ut_user, "LOGIN", sizeof(ut.ut_user));
