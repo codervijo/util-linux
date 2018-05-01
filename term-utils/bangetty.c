@@ -50,10 +50,6 @@
 #include "fileutils.h"
 #include "pwdutils.h"
 
-#ifdef USE_PLYMOUTH_SUPPORT
-# include "plymouth-ctrl.h"
-#endif
-
 #ifdef HAVE_SYS_PARAM_H
 # include <sys/param.h>
 #endif
@@ -246,7 +242,7 @@ login_ui_t *setup_first_screen(void)
 	menu_opts_off(lui->menu, O_SHOWDESC);
 	menu_opts_off(lui->menu, O_ROWMAJOR);
 	set_menu_win(lui->menu, lui->menuwin);
-	set_menu_format(lui->menu, 2, 0);
+	set_menu_format(lui->menu, 4, 0);
 	set_menu_mark(lui->menu, "");
 
 	//form_driver (lui->iform, REQ_CLR_FIELD);
@@ -481,7 +477,6 @@ static void init_tty(struct login_context *cxt)
 	ttt.c_cflag &= ~HUPCL;
 
 	if ((fchown(0, 0, 0) || fchmod(0, cxt->tty_mode)) && errno != EROFS) {
-
 		syslog(LOG_ERR, _("FATAL: %s: change permissions failed: %m"),
 				cxt->tty_path);
 		sleepexit(EXIT_FAILURE);
@@ -811,14 +806,18 @@ sleep(10);
     debug("before setpgrp");
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
+    debug("after setpgrp\n");
 	init_tty(&cxt);
+
+    debug("about to open logs\n");
 
 	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
 
+    debug("logs opened\n");
 	/* the user has already been authenticated */
 	cxt.noauth = getuid() == 0 ? 1 : 0;
 
-    debug("before xgetpwnam");
+    debug("before xgetpwnam\n");
 	cxt.pwd = xgetpwnam(cxt.username, &cxt.pwdbuf);
 	if (!cxt.pwd) {
 		warnx(_("\nSession setup problem, abort."));
@@ -1062,9 +1061,7 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 {
 	const pid_t pid = getpid();
 	int closed = 0;
-#ifndef KDGKBMODE
 	int serial;
-#endif
 
 	/* Set up new standard input, unless we are given an already opened port. */
 
@@ -1178,41 +1175,17 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 	/* make stdio unbuffered for slow modem lines */
 	setvbuf(stdout, NULL, _IONBF, 0);
 
-	/*
-	 * The following ioctl will fail if stdin is not a tty, but also when
-	 * there is noise on the modem control lines. In the latter case, the
-	 * common course of action is (1) fix your cables (2) give the modem
-	 * more time to properly reset after hanging up.
-	 *
-	 * SunOS users can achieve (2) by patching the SunOS kernel variable
-	 * "zsadtrlow" to a larger value; 5 seconds seems to be a good value.
-	 * http://www.sunmanagers.org/archives/1993/0574.html
-	 */
 	memset(tp, 0, sizeof(struct termios));
 	if (tcgetattr(STDIN_FILENO, tp) < 0)
 		log_err(_("%s: failed to get terminal attributes: %m"), tty);
 
-
-	/*
-	 * Detect if this is a virtual console or serial/modem line.
-	 * In case of a virtual console the ioctl KDGKBMODE succeeds
-	 * whereas on other lines it will fails.
-	 */
-#ifdef KDGKBMODE
-	if (ioctl(STDIN_FILENO, KDGKBMODE, &op->kbmode) == 0)
-#else
 	if (ioctl(STDIN_FILENO, TIOCMGET, &serial) < 0 && (errno == EINVAL))
-#endif
 	{
 		op->flags |= F_VCONSOLE;
 		if (!op->term)
 			op->term = DEFAULT_VCTERM;
 	} else {
-#ifdef K_RAW
-		op->kbmode = K_RAW;
-#endif
-		if (!op->term)
-			op->term = DEFAULT_STERM;
+		log_err(_("%s: serial is not supported\n"), tty);
 	}
 
 	if (setenv("TERM", op->term, 1) != 0)
@@ -1239,48 +1212,10 @@ static void termio_init(struct options *op, struct termios *tp)
 {
 	speed_t ispeed = 0, ospeed = 0; // XXX WRONG!!
 	struct winsize ws;
-#ifdef USE_PLYMOUTH_SUPPORT
-	struct termios lock;
-	int i =  (plymouth_command(MAGIC_PING) == 0) ? PLYMOUTH_TERMIOS_FLAGS_DELAY : 0;
-	if (i)
-		plymouth_command(MAGIC_QUIT);
-	while (i-- > 0) {
-		/*
-		 * Even with TTYReset=no it seems with systemd or plymouth
-		 * the termios flags become changed from under the first
-		 * agetty on a serial system console as the flags are locked.
-		 */
-		memset(&lock, 0, sizeof(struct termios));
-		if (ioctl(STDIN_FILENO, TIOCGLCKTRMIOS, &lock) < 0)
-			break;
-		if (!lock.c_iflag && !lock.c_oflag && !lock.c_cflag && !lock.c_lflag)
-			break;
-		debug("termios locked\n");
-		sleep(1);
-	}
-	memset(&lock, 0, sizeof(struct termios));
-	ioctl(STDIN_FILENO, TIOCSLCKTRMIOS, &lock);
-#endif
 
 	if (op->flags & F_VCONSOLE) {
-#if defined(IUTF8) && defined(KDGKBMODE)
-		switch(op->kbmode) {
-		case K_UNICODE:
-			setlocale(LC_CTYPE, "C.UTF-8");
-			op->flags |= F_UTF8;
-			break;
-		case K_RAW:
-		case K_MEDIUMRAW:
-		case K_XLATE:
-		default:
-			setlocale(LC_CTYPE, "POSIX");
-			op->flags &= ~F_UTF8;
-			break;
-		}
-#else
 		setlocale(LC_CTYPE, "POSIX");
 		op->flags &= ~F_UTF8;
-#endif
 		reset_vc(op, tp);
 
 		if ((op->flags & F_NOCLEAR) == 0)
