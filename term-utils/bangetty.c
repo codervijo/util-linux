@@ -88,7 +88,6 @@ struct ban_context {
 	struct passwd   *pwd;	               /* user info */
 	char		    *pwdbuf;	           /* pwd strings */
 	pid_t		     pid;
-	int		         noauth;
 	int              flags;			/* toggle switches, see below */
 	char            *tty;			    /* name of tty */
 	char            *term;	    		/* terminal type */
@@ -177,7 +176,7 @@ login_ui_t *setup_first_screen(void)
 	init_pair(1, COLOR_WHITE, COLOR_BLUE);
 	init_pair(2, COLOR_WHITE, COLOR_BLUE);
 
-	lui   = malloc(sizeof(login_ui_t));
+	lui   = xmalloc(sizeof(login_ui_t));
 	lui->numitems  = NUM_ITEMS;
 	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
 	assert(lui->bodywin != NULL);
@@ -202,7 +201,6 @@ login_ui_t *setup_first_screen(void)
 	set_menu_win(lui->menu, lui->menuwin);
 	set_menu_format(lui->menu, 4, 0);
 	set_menu_mark(lui->menu, "");
-
 
 
 	post_menu(lui->menu);
@@ -696,39 +694,35 @@ void login_now(int argc, char **argv)
 		.pid = getpid(),		  /* PID */
 	};
 
-debug("inside login_now");
+	debug("inside login_now");
 	signal(SIGQUIT, SIG_IGN);
 	signal(SIGINT, SIG_IGN);
 
 	setpriority(PRIO_PROCESS, 0, 0);
 	initproctitle(argc, argv);
 
-debug("setting username to root");
-    cxt.username = malloc(10); /* XXX free, or better way to set it */
-    memset(cxt.username, 0, 10);
+	debug("setting username to root");
+	cxt.username = xmalloc(10); /* XXX free, or better way to set it */
+	memset(cxt.username, 0, 10);
 	strcpy(cxt.username, "root");
-debug("set username to root");
-sleep(10);
+	debug("set username to root");
+	sleep(10);
 
 #if 0
 	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
 		close(cnt);
 #endif
-    debug("before setpgrp");
+	debug("before setpgrp");
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
-    debug("after setpgrp\n");
+	debug("after setpgrp\n");
 	init_tty(&cxt);
 
-    debug("about to open logs\n");
-
+	debug("about to open logs\n");
 	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
+	debug("logs opened\n");
 
-    debug("logs opened\n");
-	/* the user has already been authenticated */
-	cxt.noauth = getuid() == 0 ? 1 : 0;
-
-    debug("before xgetpwnam\n");
+	debug("before xgetpwnam\n");
 	cxt.pwd = xgetpwnam(cxt.username, &cxt.pwdbuf);
 	if (!cxt.pwd) {
 		warnx(_("\nSession setup problem, abort."));
@@ -739,7 +733,7 @@ sleep(10);
 
 	pwd = cxt.pwd;
 	//cxt.username = pwd->pw_name;
-    debug("set username cxt.username\n");
+	debug("set username cxt.username\n");
 
 	setgroups(0, NULL);/* root */
 
@@ -764,7 +758,7 @@ sleep(10);
 
 	log_syslog(&cxt);
 
-    motd();
+	motd();
 
 	/*
 	 * Detach the controlling terminal, fork, and create a new session
