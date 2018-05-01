@@ -83,10 +83,6 @@ struct options {
 	char         *tty;			    /* name of tty */
 	char         *vcline;			/* line of virtual console */
 	char         *term;	    		/* terminal type */
-	char         *issue;			/* alternative issue file or directory */
-	char         *osrelease;		/* /etc/os-release data */
-	unsigned int  delay;			/* Sleep seconds before prompt */
-	int           numspeed;			/* number of baud rates to try */
 	int           clocal;			/* CLOCAL_MODE_* */
 	int           kbmode;			/* Keyboard mode if virtual console */
 };
@@ -98,17 +94,10 @@ enum {
 };
 
 
-#define F_WAITCRLF	   (1<<5)	/* wait for CR or LF */
-#define F_NOPROMPT	   (1<<7)	/* do not ask for login name! */
-#define F_LCUC		   (1<<8)	/* support for *LCUC stty modes */
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
 #define F_VCONSOLE	   (1<<12)	/* This is a virtual console */
 #define F_HANGUP	   (1<<13)	/* Do call vhangup(2) */
-#define F_UTF8		   (1<<14)	/* We can do UTF8 */
-#define F_LOGINPAUSE   (1<<15)	/* Wait for any key before dropping login prompt */
 #define F_NOCLEAR	   (1<<16)  /* Do not clear the screen before prompting */
-#define F_NONL		   (1<<17)  /* No newline before issue */
-#define F_NOHINTS	   (1<<20)  /* Don't print hints */
 
 #define serial_tty_option(opt, flag)	\
 	(((opt)->flags & (F_VCONSOLE|(flag))) == (flag))
@@ -1503,22 +1492,6 @@ int main(int argc, char **argv)
 		fcntl(STDOUT_FILENO, F_SETFL,
 			  fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 
-	/* Optionally wait for CR or LF before writing /etc/issue */
-	if (serial_tty_option(&options, F_WAITCRLF)) {
-		char ch;
-
-		debug("waiting for cr-lf\n");
-		while (read(STDIN_FILENO, &ch, 1) == 1) {
-			/* Strip "parity bit". */
-			ch &= 0x7f;
-#ifdef DEBUGGING
-			fprintf(dbf, "read %c\n", ch);
-#endif
-			if (ch == '\n' || ch == '\r')
-				break;
-		}
-	}
-
 	INIT_CHARDATA(&chardata);
 
 	print_issue_file(&options, &termios);
@@ -1534,7 +1507,7 @@ int main(int argc, char **argv)
 	sigaction(SIGQUIT, &sa_quit, NULL);
 	sigaction(SIGINT, &sa_int, NULL);
 
-	free(options.osrelease);
+	//free(options.osrelease);
 
 	/* Let the login program take care of password validation. */
 	//execv(options.login, login_argv);
