@@ -379,10 +379,11 @@ static void init_tty(struct ban_context *cxt)
 	struct stat st;
 	struct termios tt, ttt;
 
-	ttymodestr    = getenv("TTYPERM");
-	cxt->tty_mode = (mode_t) atoi(ttymodestr);
-
-	get_terminal_name(&cxt->tty_path, &cxt->tty_name, &cxt->tty_number);
+	//get_terminal_name(&cxt->tty_path, &cxt->tty_name, &cxt->tty_number);
+        cxt->tty_path   = xmalloc(strlen("/dev/tty1"));
+	xstrncpy(cxt->tty_path, "/dev/tty1", sizeof("/dev/tty1"));
+        cxt->tty_name   = cxt->tty_path + 3;
+        cxt->tty_number = cxt->tty_path + 8; 
 
 	/*
 	 * In case login is suid it was possible to use a hardlink as stdin
@@ -412,19 +413,15 @@ static void init_tty(struct ban_context *cxt)
 	}
 
 	/* Kill processes left on this tty */
-	tcsetattr(0, TCSANOW, &ttt);
+	//tcsetattr(0, TCSANOW, &ttt);
 
-	/*
-	 * Let's close file descriptors before vhangup
-	 * https://lkml.org/lkml/2012/6/5/145
-	 */
-	close(STDIN_FILENO);
-	close(STDOUT_FILENO);
-	close(STDERR_FILENO);
+	//close(STDIN_FILENO);
+	//close(STDOUT_FILENO);
+	//close(STDERR_FILENO);
 
-	signal(SIGHUP, SIG_IGN);	/* so vhangup() won't kill us */
-	vhangup();
-	signal(SIGHUP, SIG_DFL);
+//	signal(SIGHUP, SIG_IGN);	/* so vhangup() won't kill us */
+//	vhangup();
+//	signal(SIGHUP, SIG_DFL);
 
 	/* open stdin,stdout,stderr to the tty */
 //	open_tty(cxt->tty_path);
