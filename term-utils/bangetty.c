@@ -78,12 +78,35 @@
 #endif
 #define DEBUGGING 1
 
-struct options {
-	int           flags;			/* toggle switches, see below */
-	char         *tty;			    /* name of tty */
-	char         *vcline;			/* line of virtual console */
-	char         *term;	    		/* terminal type */
-	int           clocal;			/* CLOCAL_MODE_* */
+#ifdef USE_TTY_GROUP
+# define TTY_MODE 0620
+#else
+# define TTY_MODE 0600
+#endif
+
+#define	TTYGRPNAME	     	"tty"	/* name of group to own ttys */
+#define VCS_PATH_MAX		  64
+#define PRG_NAME       "bangetty"
+
+/*
+ * Main control struct
+ */
+struct ban_context {
+	const char	    *tty_path;	           /* ttyname() return value */
+	const char	    *tty_name;	           /* tty_path without /dev prefix */
+	const char	    *tty_number;	       /* end of the tty_path */
+	mode_t		     tty_mode;	           /* chmod() mode */
+	char		    *username;	           /* from command line or PAM */
+	struct passwd   *pwd;	               /* user info */
+	char		    *pwdbuf;	           /* pwd strings */
+	pid_t		     pid;
+	int		         quiet;		           /* 1 if hush file exists */
+	int		         noauth;
+	int              flags;			/* toggle switches, see below */
+	char            *tty;			    /* name of tty */
+	char            *vcline;			/* line of virtual console */
+	char            *term;	    		/* terminal type */
+	int              clocal;			/* CLOCAL_MODE_* */
 };
 
 enum {
@@ -101,12 +124,12 @@ enum {
 #define serial_tty_option(opt, flag)	\
 	(((opt)->flags & (F_VCONSOLE|(flag))) == (flag))
 
-static void parse_args(int argc, char **argv, struct options *op);
-static void update_utmp(struct options *op);
-static void open_tty(char *tty, struct termios *tp, struct options *op);
-static void termio_init(struct options *op, struct termios *tp);
-static void reset_vc (const struct options *op, struct termios *tp);
-static void termio_final(struct options *op,
+static void parse_args(int argc, char **argv, struct ban_context *op);
+static void update_utmp(struct ban_context *op);
+static void open_tty(char *tty, struct termios *tp, struct ban_context *op);
+static void termio_init(struct ban_context *op, struct termios *tp);
+static void reset_vc (const struct ban_context *op, struct termios *tp);
+static void termio_final(struct ban_context *op,
 						 struct termios *tp, struct chardata *cp);
 static void usage(void) __attribute__((__noreturn__));
 static void exit_slowly(int code) __attribute__((__noreturn__));
@@ -114,7 +137,6 @@ static void log_err(const char *, ...) __attribute__((__noreturn__))
 				   __attribute__((__format__(printf, 1, 2)));
 static void log_warn (const char *, ...)
 				__attribute__((__format__(printf, 1, 2)));
-static void print_issue_file(struct options *op, struct termios *tp);
 
 #ifdef DEBUGGING
 # include "closestream.h"
@@ -151,16 +173,6 @@ FILE *dbf;
 
 #define DEFAULT_WINDOW_START_ROW                        0
 #define DEFAULT_WINDOW_START_COL                        0
-
-#define FORM_WINDOW_HEIGHT                (OPTIONS_ROW-1)
-#define FORM_WINDOW_WIDTH               DEFAULT_WIN_WIDTH
-#define FORM_WINDOW_START_ROW    DEFAULT_WINDOW_START_ROW
-#define FORM_WINDOW_START_COL    DEFAULT_WINDOW_START_COL
-
-#define FORM_SUBWIN_HEIGHT                             10
-#define FORM_SUBWIN_WIDTH                              40
-#define FORM_SUBWIN_START_ROW                (USER_ROW-1)
-#define FORM_SUBWIN_START_COL          (START_TEXT_COL-2)
 
 #define MENU_WINDOW_HEIGHT                             5
 #define MENU_WINDOW_WIDTH                              70
@@ -320,32 +332,6 @@ int teardown_first_screen(login_ui_t *lui)
 	teardown_first_screen(lui);
 }*/
 
-#ifdef USE_TTY_GROUP
-# define TTY_MODE 0620
-#else
-# define TTY_MODE 0600
-#endif
-
-#define	TTYGRPNAME	     	"tty"	/* name of group to own ttys */
-#define VCS_PATH_MAX		  64
-#define PRG_NAME       "bangetty"
-
-/*
- * Login control struct
- */
-struct login_context {
-	const char	    *tty_path;	           /* ttyname() return value */
-	const char	    *tty_name;	           /* tty_path without /dev prefix */
-	const char	    *tty_number;	       /* end of the tty_path */
-	mode_t		     tty_mode;	           /* chmod() mode */
-	char		    *username;	           /* from command line or PAM */
-	struct passwd   *pwd;	               /* user info */
-	char		    *pwdbuf;	           /* pwd strings */
-	pid_t		     pid;
-	int		         quiet;		           /* 1 if hush file exists */
-	int		         noauth;
-};
-
 /*
  * This bounds the time given to login.  Not a define, so it can
  * be patched on machines where it's too small.
@@ -407,7 +393,7 @@ static void motd(void)
 #define chmod_err(_what, _mode) \
 		syslog(LOG_ERR, _("chmod (%s, %u) failed: %m"), (_what), (_mode))
 
-static void chown_tty(struct login_context *cxt)
+static void chown_tty(struct ban_context *cxt)
 {
 	const char *grname, *gidstr;
 	uid_t uid = cxt->pwd->pw_uid;
@@ -432,7 +418,7 @@ static void chown_tty(struct login_context *cxt)
 /*
  * Reads the current terminal path and initializes cxt->tty_* variables.
  */
-static void init_tty(struct login_context *cxt)
+static void init_tty(struct ban_context *cxt)
 {
 	char *ttymodestr;
 	struct stat st;
@@ -492,7 +478,7 @@ static void init_tty(struct login_context *cxt)
 	tcsetattr(0, TCSAFLUSH, &tt);
 }
 
-static void log_lastlog(struct login_context *cxt)
+static void log_lastlog(struct ban_context *cxt)
 {
 	struct sigaction sa, oldsa_xfsz;
 	struct lastlog ll;
@@ -554,7 +540,7 @@ done:
 /*
  * Update wtmp and utmp logs.
  */
-static void log_utmp(struct login_context *cxt)
+static void log_utmp(struct ban_context *cxt)
 {
 	struct utmpx ut;
 	struct utmpx *utp;
@@ -620,7 +606,7 @@ static void log_utmp(struct login_context *cxt)
 	updwtmpx(_PATH_WTMP, &ut);
 }
 
-static void log_syslog(struct login_context *cxt)
+static void log_syslog(struct ban_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
 
@@ -643,7 +629,7 @@ static void log_syslog(struct login_context *cxt)
  * Detach the controlling terminal, fork, restore syslog stuff, and create
  * a new session.
  */
-static void fork_session(struct login_context *cxt)
+static void fork_session(struct ban_context *cxt)
 {
 	struct sigaction sa, oldsa_hup, oldsa_term;
 
@@ -727,7 +713,7 @@ static void fork_session(struct login_context *cxt)
 /*
  * Initialize $TERM, $HOME, ...
  */
-static void init_environ(struct login_context *cxt)
+static void init_environ(struct ban_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
 	char *termenv;
@@ -768,7 +754,7 @@ void login_now(int argc, char **argv)
 	int childArgc = 0;
 	struct passwd *pwd;
 
-	struct login_context cxt = {
+	struct ban_context cxt = {
 		.tty_mode = TTY_MODE,		  /* tty chmod() */
 		.pid = getpid(),		  /* PID */
 	};
@@ -926,7 +912,7 @@ static void output_version(void)
 #define is_speed(str) (strlen((str)) == strspn((str), "0123456789,"))
 
 /* Parse command-line arguments. */
-static void parse_args(int argc, char **argv, struct options *op)
+static void parse_args(int argc, char **argv, struct ban_context *op)
 {
 	int c;
 
@@ -973,7 +959,7 @@ static void parse_args(int argc, char **argv, struct options *op)
 #ifdef	SYSV_STYLE
 
 /* Update our utmp entry. */
-static void update_utmp(struct options *op)
+static void update_utmp(struct ban_context *op)
 {
 	struct utmpx ut;
 	time_t t;
@@ -1045,7 +1031,7 @@ static void update_utmp(struct options *op)
 #endif				/* SYSV_STYLE */
 
 /* Set up tty as stdin, stdout & stderr. */
-static void open_tty(char *tty, struct termios *tp, struct options *op)
+static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 {
 	const pid_t pid = getpid();
 	int closed = 0;
@@ -1196,7 +1182,7 @@ static void termio_clear(int fd)
 }
 
 /* Initialize termios settings. */
-static void termio_init(struct options *op, struct termios *tp)
+static void termio_init(struct ban_context *op, struct termios *tp)
 {
 	speed_t ispeed = 0, ospeed = 0; // XXX WRONG!!
 	struct winsize ws;
@@ -1274,7 +1260,7 @@ static void termio_init(struct options *op, struct termios *tp)
 }
 
 /* Reset virtual console on stdin to its defaults */
-static void reset_vc(const struct options *op, struct termios *tp)
+static void reset_vc(const struct ban_context *op, struct termios *tp)
 {
 	int fl = 0;
 
@@ -1290,15 +1276,9 @@ static void reset_vc(const struct options *op, struct termios *tp)
 		  fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 }
 
-static void print_issue_file(struct options *op, struct termios *tp __attribute__((__unused__)))
-{
-	(void)op;
-	/* Issue not in use, start with a new line. */
-	write_all(STDOUT_FILENO, "\r\n", 2);
-}
 
 /* Set the final tty mode bits. */
-static void termio_final(struct options *op, struct termios *tp, struct chardata *cp)
+static void termio_final(struct ban_context *op, struct termios *tp, struct chardata *cp)
 {
 	/* General terminal-independent stuff. */
 
@@ -1420,7 +1400,7 @@ int main(int argc, char **argv)
 {
 	struct chardata chardata;		/* will be set by get_logname() */
 	struct termios termios;			/* terminal mode bits */
-	struct options options = {
+	struct ban_context options = {
 		.tty    = "tty1"		/* default tty line */
 	};
 	//char *login_argv[LOGIN_ARGV_MAX + 1];
@@ -1484,8 +1464,6 @@ int main(int argc, char **argv)
 			  fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 
 	INIT_CHARDATA(&chardata);
-
-	print_issue_file(&options, &termios);
 
 	if ((options.flags & F_VCONSOLE) == 0) {
 		/* Finalize the termios settings. */
