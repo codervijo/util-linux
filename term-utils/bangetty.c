@@ -1203,7 +1203,7 @@ static void termio_init(struct options *op, struct termios *tp)
 
 	if (op->flags & F_VCONSOLE) {
 		setlocale(LC_CTYPE, "POSIX");
-		op->flags &= ~F_UTF8;
+		//op->flags &= ~F_UTF8; VIJO -> FIXME
 		reset_vc(op, tp);
 
 		if ((op->flags & F_NOCLEAR) == 0)
@@ -1218,14 +1218,7 @@ static void termio_init(struct options *op, struct termios *tp)
 	 * later on.
 	 */
 
-#ifdef IUTF8
-	tp->c_iflag = tp->c_iflag & IUTF8;
-	if (tp->c_iflag & IUTF8)
-		op->flags |= F_UTF8;
-#else
 	tp->c_iflag = 0;
-#endif
-	tp->c_lflag = 0;
 	tp->c_oflag &= OPOST | ONLCR;
 
 	if ((op->flags & F_KEEPCFLAGS) == 0)
@@ -1286,7 +1279,6 @@ static void reset_vc(const struct options *op, struct termios *tp)
 	int fl = 0;
 
 	fl |= (op->flags & F_KEEPCFLAGS) == 0 ? 0 : UL_TTY_KEEPCFLAGS;
-	fl |= (op->flags & F_UTF8)       == 0 ? 0 : UL_TTY_UTF8;
 
 	reset_virtual_console(tp, fl);
 
