@@ -88,7 +88,6 @@ struct ban_context {
 	struct passwd   *pwd;	               /* user info */
 	char		    *pwdbuf;	           /* pwd strings */
 	pid_t		     pid;
-	int		         quiet;		           /* 1 if hush file exists */
 	int		         noauth;
 	int              flags;			/* toggle switches, see below */
 	char            *tty;			    /* name of tty */
@@ -458,26 +457,6 @@ static void log_lastlog(struct ban_context *cxt)
 	if (lseek(fd, (off_t) cxt->pwd->pw_uid * sizeof(ll), SEEK_SET) == -1)
 		goto done;
 
-	/*
-	 * Print last log message.
-	 */
-	if (!cxt->quiet) {
-		if (read(fd, (char *)&ll, sizeof(ll)) == sizeof(ll) &&
-							ll.ll_time != 0) {
-			time_t ll_time = (time_t) ll.ll_time;
-
-			printf(_("Last login: %.*s "), 24 - 5, ctime(&ll_time));
-			if (*ll.ll_host != '\0')
-				printf(_("from %.*s\n"),
-					   (int)sizeof(ll.ll_host), ll.ll_host);
-			else
-				printf(_("on %.*s\n"),
-					   (int)sizeof(ll.ll_line), ll.ll_line);
-		}
-		if (lseek(fd, (off_t) cxt->pwd->pw_uid * sizeof(ll), SEEK_SET) == -1)
-			goto done;
-	}
-
 	memset((char *)&ll, 0, sizeof(ll));
 
 	time(&t);
@@ -766,8 +745,6 @@ sleep(10);
 
 	endpwent();
 
-	cxt.quiet = 0;//get_hushlogin_status(pwd, 1);
-
 	log_utmp(&cxt);
 	log_lastlog(&cxt);
 
@@ -787,9 +764,7 @@ sleep(10);
 
 	log_syslog(&cxt);
 
-	if (!cxt.quiet) {
-		motd();
-	}
+    motd();
 
 	/*
 	 * Detach the controlling terminal, fork, and create a new session
