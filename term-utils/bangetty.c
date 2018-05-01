@@ -36,17 +36,12 @@
 
 #include "strutils.h"
 #include "all-io.h"
-#include "nls.h"
 #include "pathnames.h"
 #include "c.h"
-#include "widechar.h"
 #include "ttyutils.h"
-#include "color-names.h"
 #include "env.h"
 #include "setproctitle.h"
-#include "env.h"
 #include "xalloc.h"
-#include "all-io.h"
 #include "fileutils.h"
 #include "pwdutils.h"
 
@@ -68,14 +63,7 @@
 
 #include <sys/sendfile.h>
 
-/*
- * Some heuristics to find out what environment we are in: if it is not
- * System V, assume it is SunOS 4. The LOGIN_PROCESS is defined in System V
- * utmp.h, which will select System V style getty.
- */
-#ifdef LOGIN_PROCESS
-#  define SYSV_STYLE
-#endif
+#define SYSV_STYLE
 #define DEBUGGING 1
 
 #ifdef USE_TTY_GROUP
@@ -110,7 +98,6 @@ struct ban_context {
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
 #define F_VCONSOLE	   (1<<12)	/* This is a virtual console */
 #define F_HANGUP	   (1<<13)	/* Do call vhangup(2) */
-#define F_NOCLEAR	   (1<<16)  /* Do not clear the screen before prompting */
 
 #define serial_tty_option(opt, flag)	\
 	(((opt)->flags & (F_VCONSOLE|(flag))) == (flag))
@@ -148,26 +135,15 @@ FILE *dbf;
 #include <unistd.h>
 #include <ctype.h>
 
-#define NUM_FIELDS                                      0
 #define NUM_ITEMS                                       3
 
-#define USER_ROW                                        9
-#define PSWD_ROW                             (USER_ROW+2)
-#define OPTIONS_ROW                          (PSWD_ROW+3)
-#define START_TEXT_COL                                 24
-#define TEXT_SIZE                                      12
-#define START_INPUT_COL                                36
-#define INPUT_SIZE                                     12
 #define DEFAULT_WIN_WIDTH                            COLS
 #define DEFAULT_WIN_HEIGHT                          LINES
-#define DEFAULT_FIELD_HEIGHT                            1
-
 #define DEFAULT_WINDOW_START_ROW                        0
 #define DEFAULT_WINDOW_START_COL                        0
-
-#define MENU_WINDOW_HEIGHT                             5
+#define MENU_WINDOW_HEIGHT                              5
 #define MENU_WINDOW_WIDTH                              70
-#define MENU_WINDOW_START_ROW             (OPTIONS_ROW-1)
+#define MENU_WINDOW_START_ROW                          14
 #define MENU_WINDOW_START_COL                          27
 
 #define DONE_TEXT                         "Start Install"
@@ -182,15 +158,14 @@ typedef struct login_ui_s {
 } login_ui_t;
 
 login_ui_t *setup_first_screen(void);
-int button_handle(ITEM *item);
+int  button_handle(ITEM *item);
 void run_ui_loop(login_ui_t *lui);
-int teardown_first_screen(login_ui_t *lui);
+int  teardown_first_screen(login_ui_t *lui);
 void login_now(int argc, char **argv);
 
 login_ui_t *setup_first_screen(void)
 {
 	login_ui_t *lui;
-	//WINDOW *tmpw1;
 
 	/* Initialize curses */
 	initscr();
@@ -207,16 +182,10 @@ login_ui_t *setup_first_screen(void)
 	lui->numitems  = NUM_ITEMS;
 	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
 	assert(lui->bodywin != NULL);
-	//box(lui->formwin, 0, 0);
-	//lui->menuwin = newwin(2, 12, MENU_ROW, 30);
+
 	lui->menuwin = derwin(lui->bodywin, MENU_WINDOW_HEIGHT, MENU_WINDOW_WIDTH, MENU_WINDOW_START_ROW, MENU_WINDOW_START_COL);
 	assert(lui->menuwin != NULL);
 	box(lui->menuwin, 0, 0);
-	//lui->menuwin = newwin(2, 12, MENU_ROW, 30);
-	//tmpw1 = derwin(lui->formwin, 10, 40, USER_ROW-1, START_TEXT_COL-2);
-	//box(tmpw1, 0, 0);
-	//set_form_sub(lui->iform, tmpw1);
-	//refresh();
 	
 	lui->itms = (ITEM **)calloc(lui->numitems, sizeof(ITEM *));
 	assert(lui->itms != NULL);
@@ -227,7 +196,6 @@ login_ui_t *setup_first_screen(void)
 	assert(lui->itms[1] != NULL);
 
 	keypad(lui->menuwin, TRUE);
-	//refresh();
 	lui->menu = new_menu((ITEM **)lui->itms);
 	assert(lui->menu != NULL);
 	menu_opts_off(lui->menu, O_SHOWDESC);
@@ -236,7 +204,6 @@ login_ui_t *setup_first_screen(void)
 	set_menu_format(lui->menu, 4, 0);
 	set_menu_mark(lui->menu, "");
 
-	//form_driver (lui->iform, REQ_CLR_FIELD);
 
 
 	post_menu(lui->menu);
@@ -254,7 +221,7 @@ int button_handle(ITEM *item)
 	 if (strcmp(name, DONE_TEXT) == 0) {
 		debug("Should exit now, trying...\n");
 		sleep(10);
-                return 1;
+        return 1;
 	 } else if (strcmp(name, CANCEL_TEXT) == 0) {
 		debug("Cancel..cancel..cancel\n");
 	 } else {
@@ -1173,8 +1140,7 @@ static void termio_init(struct ban_context *op, struct termios *tp)
 		//op->flags &= ~F_UTF8; VIJO -> FIXME
 		reset_vc(op, tp);
 
-		if ((op->flags & F_NOCLEAR) == 0)
-			termio_clear(STDOUT_FILENO);
+		termio_clear(STDOUT_FILENO);
 		return;
 	}
 
@@ -1325,7 +1291,7 @@ static void __attribute__((__noreturn__)) usage(void)
 
 	fputs(USAGE_OPTIONS, out);
 
-	printf(USAGE_MAN_TAIL("agetty(8)"));
+	printf(USAGE_MAN_TAIL("bangetty(8)"));
 
 	exit(EXIT_SUCCESS);
 }
@@ -1371,8 +1337,6 @@ int main(int argc, char **argv)
 	struct ban_context options = {
 		.tty    = "tty1"		/* default tty line */
 	};
-	//char *login_argv[LOGIN_ARGV_MAX + 1];
-	//int login_argc = 0;
 	struct sigaction sa, sa_hup, sa_quit, sa_int;
 	sigset_t set;
 	login_ui_t *lui;
@@ -1443,12 +1407,6 @@ int main(int argc, char **argv)
 
 	sigaction(SIGQUIT, &sa_quit, NULL);
 	sigaction(SIGINT, &sa_int, NULL);
-
-	//free(options.osrelease);
-
-	/* Let the login program take care of password validation. */
-	//execv(options.login, login_argv);
-	//log_err(_("%s: can't exec %s: %m"), options.tty, login_argv[0]);
 
 	lui = setup_first_screen();
 	run_ui_loop(lui);
