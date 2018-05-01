@@ -628,7 +628,7 @@ static void log_syslog(struct login_context *cxt)
 		return;
 
 	if (!strncmp(cxt->tty_name, "ttyS", 4))
-		syslog(LOG_INFO, _("DIALUP AT %s BY %s"),
+		syslog(LOG_INFO, _("Unsupported DIALUP AT %s BY %s"),
 			   cxt->tty_name, pwd->pw_name);
 
 	if (!pwd->pw_uid) {
