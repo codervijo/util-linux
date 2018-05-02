@@ -24,19 +24,20 @@
 #include <time.h>
 #include <pwd.h>
 #include <grp.h>
+#include <pathnames.h>
 #include <sys/utsname.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <form.h>
+#include <menu.h>
+#include <assert.h>
 
 #include "strutils.h"
 #include "all-io.h"
-#include "pathnames.h"
-#include "c.h"
 #include "ttyutils.h"
 #include "env.h"
-#include "setproctitle.h"
+//#include "setproctitle.h"
 #include "xalloc.h"
-#include "fileutils.h"
 #include "pwdutils.h"
 
 #ifdef HAVE_SYS_PARAM_H
@@ -118,14 +119,6 @@ FILE *dbf;
 # define debug(s) do { ; } while (0)
 #endif
 
-#include <form.h>
-#include <menu.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <unistd.h>
-#include <ctype.h>
-
 #define NUM_ITEMS                                       3
 
 #define DEFAULT_WIN_WIDTH                            COLS
@@ -195,7 +188,6 @@ ban_ui_t *setup_first_screen(void)
 	set_menu_format(lui->menu, 4, 0);
 	set_menu_mark(lui->menu, "");
 
-
 	post_menu(lui->menu);
 	//refresh();
 	wrefresh(lui->bodywin);
@@ -211,7 +203,7 @@ int button_handle(ITEM *item)
 	 if (strcmp(name, DONE_TEXT) == 0) {
 		debug("Should exit now, trying...\n");
 		sleep(10);
-        return 1;
+		return 1;
 	 } else if (strcmp(name, CANCEL_TEXT) == 0) {
 		debug("Cancel..cancel..cancel\n");
 	 } else {
@@ -405,14 +397,6 @@ static void init_tty(struct ban_context *cxt)
 
 	/* Kill processes left on this tty */
 	//tcsetattr(0, TCSANOW, &ttt);
-
-	//close(STDIN_FILENO);
-	//close(STDOUT_FILENO);
-	//close(STDERR_FILENO);
-
-//	signal(SIGHUP, SIG_IGN);	/* so vhangup() won't kill us */
-//	vhangup();
-//	signal(SIGHUP, SIG_DFL);
 
 	/* open stdin,stdout,stderr to the tty */
 //	open_tty(cxt->tty_path);
