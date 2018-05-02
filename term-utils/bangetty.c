@@ -687,7 +687,7 @@ void login_now(int argc, char **argv)
 	signal(SIGINT, SIG_IGN);
 
 	setpriority(PRIO_PROCESS, 0, 0);
-	initproctitle(argc, argv);
+	//initproctitle(argc, argv);
 
 	debug("setting username to root");
 	cxt.username = xmalloc(10); /* XXX free, or better way to set it */
@@ -742,7 +742,7 @@ void login_now(int argc, char **argv)
 
 	init_environ(&cxt);		/* init $HOME, $TERM ... */
 
-	setproctitle(PRG_NAME, cxt.username);
+	//setproctitle(PRG_NAME, cxt.username);
 
 	log_syslog(&cxt);
 
@@ -753,7 +753,7 @@ void login_now(int argc, char **argv)
 	 * and reinitialize syslog stuff.
 	 */
 	fork_session(&cxt);
-debug("fork done\n");
+	debug("fork done\n");
 
 	/* discard permissions last so we can't get killed and drop core */
 	if (setuid(pwd->pw_uid) < 0 && pwd->pw_uid) {
@@ -771,35 +771,24 @@ debug("fork done\n");
 		printf(_("Logging in with home = \"/\".\n"));
 	}
 
-	/* if the shell field has a space: treat it like a shell script */
-	if (strchr(pwd->pw_shell, ' ')) {
-		buff = xmalloc(strlen(pwd->pw_shell) + 6);
+        childArgc              = 0;
+	childArgv[childArgc++] = "/bin/sh";
+	childArgv[childArgc++] = "-sh";
+	if (argc > 1) {
+		debug("handling argc\n");
+                printf("%d arguments are {%s}-{%s}\n", argc, argv[0], argv[1]);
+		buff = xmalloc(strlen(argv[1]) + 6);
 
 		strcpy(buff, "exec ");
-		strcat(buff, pwd->pw_shell);
-		childArgv[childArgc++] = "/bin/sh";
-		childArgv[childArgc++] = "-sh";
+		strcat(buff, argv[1]);
 		childArgv[childArgc++] = "-c";
 		childArgv[childArgc++] = buff;
-	} else {
-		char tbuf[PATH_MAX + 2], *p;
-
-		tbuf[0] = '-';
-		xstrncpy(tbuf + 1, ((p = strrchr(pwd->pw_shell, '/')) ?
-					p + 1 : pwd->pw_shell), sizeof(tbuf) - 1);
-
-		childArgv[childArgc++] = pwd->pw_shell;
-		childArgv[childArgc++] = xstrdup(tbuf);
 	}
-
-	childArgv[childArgc++] = NULL;
+        childArgv[childArgc++] = NULL;
 
 	execvp(childArgv[0], childArgv + 1);
 
-	if (!strcmp(childArgv[0], "/bin/sh"))
-		warn(_("couldn't exec shell script"));
-	else
-		warn(_("no shell"));
+	warn(_("no shell"));
 
 	exit(EXIT_SUCCESS);
 }
