@@ -22,14 +22,8 @@
 #include <utmpx.h>
 #include <getopt.h>
 #include <time.h>
-#include <sys/socket.h>
-#include <langinfo.h>
 #include <pwd.h>
 #include <grp.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <ifaddrs.h>
-#include <net/if.h>
 #include <sys/utsname.h>
 #include <sys/time.h>
 #include <sys/resource.h>
