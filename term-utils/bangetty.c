@@ -140,23 +140,23 @@ FILE *dbf;
 #define DONE_TEXT                         "Start Install"
 #define CANCEL_TEXT                       "Exit To Shell"
 
-typedef struct login_ui_s {
+typedef struct ban_ui_s {
 	int      numitems;
 	ITEM   **itms;
 	MENU    *menu;
 	WINDOW  *bodywin;
 	WINDOW  *menuwin;
-} login_ui_t;
+} ban_ui_t;
 
-login_ui_t *setup_first_screen(void);
+ban_ui_t *setup_first_screen(void);
 int  button_handle(ITEM *item);
-void run_ui_loop(login_ui_t *lui);
-int  teardown_first_screen(login_ui_t *lui);
+void run_ui_loop(ban_ui_t *lui);
+int  teardown_first_screen(ban_ui_t *lui);
 void login_now(int argc, char **argv);
 
-login_ui_t *setup_first_screen(void)
+ban_ui_t *setup_first_screen(void)
 {
-	login_ui_t *lui;
+	ban_ui_t *lui;
 
 	/* Initialize curses */
 	initscr();
@@ -169,7 +169,7 @@ login_ui_t *setup_first_screen(void)
 	init_pair(1, COLOR_WHITE, COLOR_BLUE);
 	init_pair(2, COLOR_WHITE, COLOR_BLUE);
 
-	lui   = xmalloc(sizeof(login_ui_t));
+	lui   = xmalloc(sizeof(ban_ui_t));
 	lui->numitems  = NUM_ITEMS;
 	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
 	assert(lui->bodywin != NULL);
@@ -221,7 +221,7 @@ int button_handle(ITEM *item)
 }
 
 
-void run_ui_loop(login_ui_t *lui)
+void run_ui_loop(ban_ui_t *lui)
 {
 	int ch;
 	int stop = 0;
@@ -251,7 +251,7 @@ void run_ui_loop(login_ui_t *lui)
 	debug("Returning from ui_loop\n");
 }
 
-int teardown_first_screen(login_ui_t *lui)
+int teardown_first_screen(ban_ui_t *lui)
 {
 	/* Un post form and free the memory */
 
@@ -273,7 +273,7 @@ int teardown_first_screen(login_ui_t *lui)
 
 /*int main()
 {
-	login_ui_t *lui;
+	ban_ui_t *lui;
 
 	lui = setup_first_screen();
 	run_ui_loop(lui);
@@ -1279,7 +1279,7 @@ int main(int argc, char **argv)
 	};
 	struct sigaction sa, sa_hup, sa_quit, sa_int;
 	sigset_t set;
-	login_ui_t *lui;
+	ban_ui_t *lui;
 
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
