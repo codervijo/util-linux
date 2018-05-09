@@ -701,8 +701,6 @@ static void output_version(void)
 	fputs(")\n", stdout);
 }
 
-#define is_speed(str) (strlen((str)) == strspn((str), "0123456789,"))
-
 /* Parse command-line arguments. */
 static void parse_args(int argc, char **argv, struct ban_context *op)
 {
