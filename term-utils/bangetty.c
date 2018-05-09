@@ -60,6 +60,17 @@
 #define SYSV_STYLE
 #define DEBUGGING 1
 
+#ifdef DEBUGGING
+# include "closestream.h"
+# ifndef DEBUG_OUTPUT
+#  define DEBUG_OUTPUT "/dev/tty10"
+# endif
+# define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
+FILE *dbf;
+#else
+# define debug(s) do { ; } while (0)
+#endif
+
 #ifdef USE_TTY_GROUP
 # define TTY_MODE 0620
 #else
@@ -321,10 +332,17 @@ static void init_tty(struct ban_context *cxt)
 	struct termios tt, ttt;
 #define BAN_TTY "/dev/tty1"
 
+<<<<<<< HEAD
         cxt->tty_path   = xmalloc(strlen(BAN_TTY));
 	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
         cxt->tty_name   = cxt->tty_path + 3;
         cxt->tty_number = cxt->tty_path + 8; 
+=======
+	cxt->tty_path   = xmalloc(strlen("/dev/tty1"));
+	xstrncpy(cxt->tty_path, "/dev/tty1", sizeof("/dev/tty1"));
+	cxt->tty_name   = cxt->tty_path + 3;
+	cxt->tty_number = cxt->tty_path + 8; 
+>>>>>>> 9f652bd... Removed unused code and add to utmp only once
 
 	/*
 	 * In case login is suid it was possible to use a hardlink as stdin
@@ -400,75 +418,6 @@ done:
 		close(fd);
 
 	sigaction(SIGXFSZ, &oldsa_xfsz, NULL);		/* restore original setting */
-}
-
-/*
- * Update wtmp and utmp logs.
- */
-static void log_utmp(struct ban_context *cxt)
-{
-	struct utmpx ut;
-	struct utmpx *utp;
-	struct timeval tv;
-
-	utmpxname(_PATH_UTMP);
-	setutxent();
-
-	/* Find pid in utmp.
-	 *
-	 * login sometimes overwrites the runlevel entry in /var/run/utmp,
-	 * confusing sysvinit. I added a test for the entry type, and the
-	 * problem was gone. (In a runlevel entry, st_pid is not really a pid
-	 * but some number calculated from the previous and current runlevel.)
-	 * -- Michael Riepe <michael@stud.uni-hannover.de>
-	 */
-	while ((utp = getutxent()))
-		if (utp->ut_pid == cxt->pid
-			&& utp->ut_type >= INIT_PROCESS
-			&& utp->ut_type <= DEAD_PROCESS)
-			break;
-
-	/* If we can't find a pre-existing entry by pid, try by line.
-	 * BSD network daemons may rely on this. */
-	if (utp == NULL && cxt->tty_name) {
-		setutxent();
-		ut.ut_type = LOGIN_PROCESS;
-		strncpy(ut.ut_line, cxt->tty_name, sizeof(ut.ut_line));
-		utp = getutxline(&ut);
-	}
-
-	/* If we can't find a pre-existing entry by pid and line, try it by id.
-	 * Very stupid telnetd daemons don't set up utmp at all. (kzak) */
-	if (utp == NULL && cxt->tty_number) {
-		 setutxent();
-		 ut.ut_type = DEAD_PROCESS;
-		 strncpy(ut.ut_id, cxt->tty_number, sizeof(ut.ut_id));
-		 utp = getutxid(&ut);
-	}
-
-	if (utp)
-		memcpy(&ut, utp, sizeof(ut));
-	else
-		/* some gettys/telnetds don't initialize utmp... */
-		memset(&ut, 0, sizeof(ut));
-
-	if (cxt->tty_number && ut.ut_id[0] == 0)
-		strncpy(ut.ut_id, cxt->tty_number, sizeof(ut.ut_id));
-	if (cxt->username)
-		strncpy(ut.ut_user, cxt->username, sizeof(ut.ut_user));
-	if (cxt->tty_name)
-		xstrncpy(ut.ut_line, cxt->tty_name, sizeof(ut.ut_line));
-
-	gettimeofday(&tv, NULL);
-	ut.ut_tv.tv_sec = tv.tv_sec;
-	ut.ut_tv.tv_usec = tv.tv_usec;
-	ut.ut_type = USER_PROCESS;
-	ut.ut_pid = cxt->pid;
-
-	pututxline(&ut);
-	endutxent();
-
-	updwtmpx(_PATH_WTMP, &ut);
 }
 
 static void log_syslog(struct ban_context *cxt)
@@ -668,7 +617,6 @@ void login_now(int startsh, int argc, char **argv)
 
 	endpwent();
 
-	log_utmp(&cxt);
 	log_lastlog(&cxt);
 
 	chown_tty(&cxt);
@@ -702,12 +650,11 @@ void login_now(int startsh, int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	/* wait until here to change directory! */
 	if (chdir(pwd->pw_dir) < 0) {
 		warn(_("%s: change directory failed"), pwd->pw_dir);
 
 		if (chdir("/"))
-			exit(EXIT_FAILURE);
+			warn(_("%s: change directory failed"), "/");
 		pwd->pw_dir = "/";
 		printf(_("Logging in with home = \"/\".\n"));
 	}
@@ -725,7 +672,7 @@ void login_now(int startsh, int argc, char **argv)
 		childArgv[childArgc++] = "-c";
 		childArgv[childArgc++] = buff;
 	}
-        childArgv[childArgc++] = NULL;
+    childArgv[childArgc++] = NULL;
 
 	execvp(childArgv[0], childArgv + 1);
 
@@ -796,8 +743,6 @@ static void parse_args(int argc, char **argv, struct ban_context *op)
 	debug("exiting parseargs\n");
 }
 
-#ifdef	SYSV_STYLE
-
 /* Update our utmp entry. */
 static void update_utmp(struct ban_context *op)
 {
@@ -819,15 +764,6 @@ static void update_utmp(struct ban_context *op)
 	utmpxname(_PATH_UTMP);
 	setutxent();
 
-	/*
-	 * Find my pid in utmp.
-	 *
-	 * FIXME: Earlier (when was that?) code here tested only utp->ut_type !=
-	 * INIT_PROCESS, so maybe the >= here should be >.
-	 *
-	 * FIXME: The present code is taken from login.c, so if this is changed,
-	 * maybe login has to be changed as well (is this true?).
-	 */
 	while ((utp = getutxent()))
 		if (utp->ut_pid == pid
 				&& utp->ut_type >= INIT_PROCESS
@@ -849,7 +785,7 @@ static void update_utmp(struct ban_context *op)
 		strncpy(ut.ut_id, ptr, sizeof(ut.ut_id));
 	}
 
-	strncpy(ut.ut_user, "LOGIN", sizeof(ut.ut_user));
+	strncpy(ut.ut_user, PRG_NAME, sizeof(ut.ut_user));
 	strncpy(ut.ut_line, line, sizeof(ut.ut_line));
 	time(&t);
 	ut.ut_tv.tv_sec = t;
@@ -862,8 +798,6 @@ static void update_utmp(struct ban_context *op)
 
 	updwtmpx(_PATH_WTMP, &ut);
 }
-
-#endif				/* SYSV_STYLE */
 
 /* Set up tty as stdin, stdout & stderr. */
 static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
@@ -1042,8 +976,6 @@ static void __attribute__((__noreturn__)) usage(void)
  * Will be used by log_err() and log_warn() therefore
  * it takes a format as well as va_list.
  */
-#define	str2cpy(b,s1,s2)	strcat(strcpy(b,s1),s2)
-
 static void exit_slowly(int code)
 {
 	/* Be kind to init(8). */
@@ -1109,9 +1041,7 @@ int main(int argc, char **argv)
 	parse_args(argc, argv, &options);
 
 	/* Update the utmp file before login */
-#ifdef	SYSV_STYLE
 	update_utmp(&options);
-#endif
 
 	debug("calling open_tty\n");
 
