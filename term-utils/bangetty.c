@@ -332,17 +332,10 @@ static void init_tty(struct ban_context *cxt)
 	struct termios tt, ttt;
 #define BAN_TTY "/dev/tty1"
 
-<<<<<<< HEAD
         cxt->tty_path   = xmalloc(strlen(BAN_TTY));
 	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
         cxt->tty_name   = cxt->tty_path + 3;
         cxt->tty_number = cxt->tty_path + 8; 
-=======
-	cxt->tty_path   = xmalloc(strlen("/dev/tty1"));
-	xstrncpy(cxt->tty_path, "/dev/tty1", sizeof("/dev/tty1"));
-	cxt->tty_name   = cxt->tty_path + 3;
-	cxt->tty_number = cxt->tty_path + 8; 
->>>>>>> 9f652bd... Removed unused code and add to utmp only once
 
 	/*
 	 * In case login is suid it was possible to use a hardlink as stdin
@@ -732,11 +725,6 @@ static void parse_args(int argc, char **argv, struct ban_context *op)
 
 	debug("after getopt loop\n");
 
-#if 0
-	if (argc > optind && argv[optind])
-		op->term = argv[optind];
-#endif
-		op->term = 0; /* XXX hardcoded to 0 for now, Vijo */ /* FIXME wrong setting */
 
 	debug("exiting parseargs\n");
 }
@@ -891,14 +879,10 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 	if (ioctl(STDIN_FILENO, TIOCMGET, &serial) < 0 && (errno == EINVAL))
 	{
 		op->flags |= F_VCONSOLE;
-		if (!op->term)
-			op->term = DEFAULT_VCTERM;
 	} else {
 		log_err(_("%s: serial is not supported\n"), tty);
 	}
 
-	if (setenv("TERM", op->term, 1) != 0)
-		log_err(_("failed to set the %s environment variable"), "TERM");
 }
 
 /* Initialize termios settings. */
