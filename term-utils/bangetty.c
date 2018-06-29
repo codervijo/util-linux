@@ -29,7 +29,6 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <form.h>
-#include <menu.h>
 #include <assert.h>
 
 #include "strutils.h"
@@ -126,24 +125,20 @@ FILE *dbf;
 #define DEFAULT_WINDOW_START_ROW                        0
 #define DEFAULT_WINDOW_START_COL                        0
 #define MENU_WINDOW_HEIGHT                              5
-#define MENU_WINDOW_WIDTH                              20
+#define MENU_WINDOW_WIDTH                              60
 #define MENU_WINDOW_START_ROW                   (LINES/2)-3
 #define MENU_WINDOW_START_COL                    (COLS/2)-14
 
-#define DONE_TEXT                         "Start Install"
+#define DONE_TEXT                 "Press Enter to start Install"
 #define CANCEL_TEXT                       "Exit To Shell"
 
 typedef struct ban_ui_s {
 	int      numitems;
-	ITEM   **itms;
-	MENU    *menu;
 	WINDOW  *bodywin;
         WINDOW  *borderwin;
-	WINDOW  *menuwin;
 } ban_ui_t;
 
 ban_ui_t *setup_first_screen(void);
-int  button_handle(ITEM *item);
 void run_ui_loop(ban_ui_t *lui);
 int  teardown_first_screen(ban_ui_t *lui);
 void login_now(int argc, char **argv);
@@ -160,8 +155,9 @@ ban_ui_t *setup_first_screen(void)
 	noecho();
 	keypad(stdscr, TRUE);
 
-	init_pair(1, COLOR_WHITE, COLOR_BLUE);    /* Window background */
-	init_pair(2, COLOR_YELLOW, COLOR_WHITE);  /* Text to make it obvious */
+	init_pair(1, COLOR_YELLOW, COLOR_BLUE);    /* Window background */
+	init_pair(2, COLOR_YELLOW, COLOR_BLUE);  /* Text to make it obvious */
+        init_pair(3, COLOR_WHITE,  COLOR_YELLOW);
 
 	lui   = xmalloc(sizeof(ban_ui_t));
 	lui->numitems  = NUM_ITEMS;
@@ -172,104 +168,63 @@ ban_ui_t *setup_first_screen(void)
         /* Create a border with some margin around the main window */
         lui->borderwin = derwin(lui->bodywin, DEFAULT_WIN_HEIGHT-10, DEFAULT_WIN_WIDTH-20, 5, 10);
         assert(lui->borderwin != NULL);
+        wattron(lui->borderwin, A_BOLD);
         box(lui->borderwin, 0, 0);
 
-	lui->menuwin = derwin(lui->bodywin, MENU_WINDOW_HEIGHT, MENU_WINDOW_WIDTH, MENU_WINDOW_START_ROW, MENU_WINDOW_START_COL);
-	assert(lui->menuwin != NULL);
-	//box(lui->menuwin, 0, 0);
-	
-	lui->itms = (ITEM **)calloc(lui->numitems, sizeof(ITEM *));
-	assert(lui->itms != NULL);
-        //attron(COLOR_PAIR(2)); DOESNT WORK
-	lui->itms[0] = new_item(DONE_TEXT, DONE_TEXT);
-	//lui->itms[1] = new_item(CANCEL_TEXT, CANCEL_TEXT);
-	lui->itms[1] = (ITEM*)NULL;
-	assert(lui->itms[0] != NULL);
-	//assert(lui->itms[1] != NULL);
+        wattron(lui->bodywin, A_BOLD);
+        wattron(lui->bodywin, COLOR_PAIR(2));
+        mvwprintw(lui->bodywin, LINES/2-2, COLS/2-20, "Please press ");
+        wattron(lui->bodywin, COLOR_PAIR(3));
+        wprintw(lui->bodywin, "Enter");
+        wattroff(lui->bodywin, A_REVERSE);
+        wattron(lui->bodywin, COLOR_PAIR(2));
+        wprintw(lui->bodywin, " to start install.....");
 
-	keypad(lui->menuwin, TRUE);
-	lui->menu = new_menu((ITEM **)lui->itms);
-	assert(lui->menu != NULL);
-	menu_opts_off(lui->menu, O_SHOWDESC);
-	menu_opts_off(lui->menu, O_ROWMAJOR);
-	set_menu_win(lui->menu, lui->menuwin);
-	set_menu_format(lui->menu, 4, 0);
-	set_menu_mark(lui->menu, "");
+        keypad(lui->bodywin, TRUE);
 
-	post_menu(lui->menu);
-	//refresh();
 	wrefresh(lui->bodywin);
         wrefresh(lui->borderwin);
-	wrefresh(lui->menuwin);
 
 	return lui;
-}
-
-int button_handle(ITEM *item)
-{
-	 const char *name = item_name(item);
-
-	 if (strcmp(name, DONE_TEXT) == 0) {
-		debug("Should exit now, trying...\n");
-		sleep(10);
-		return 1;
-	 } else if (strcmp(name, CANCEL_TEXT) == 0) {
-		debug("Cancel..cancel..cancel\n");
-	 } else {
-		exit(1);
-	 }
-	 return 0;
 }
 
 
 void run_ui_loop(ban_ui_t *lui)
 {
-	int ch;
+	int ch, ch2;
 	int stop = 0;
 
 	curs_set(1);
+        wmove(lui->bodywin, LINES/2-2, COLS/2-20+13);
 	/* Loop through to get user requests */
-	while (stop != 1 && (ch = wgetch(lui->menuwin)) != KEY_ENTER)
+	while (stop != 1 )
 	{
-		//printf("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
+                ch = wgetch(lui->bodywin);
+		printw("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
+                ch2 = getch();
+		printw("Got ch: %x, UP is %x down %x\n", ch2, KEY_UP, KEY_DOWN);
 		switch(ch) {
-		case KEY_DOWN:
-			menu_driver(lui->menu, REQ_NEXT_ITEM);
-			break;
-		case KEY_UP:
-			menu_driver(lui->menu, REQ_PREV_ITEM);
-			break;
                 case 27:
                         debug("Escaping to shell\n");
                         stop = 1;
                         break;
 		case 10:
-			if (button_handle(current_item(lui->menu)) == 1) {
-			    stop = 1;
-			    break;
-			}
+	                debug("Should exit now, trying...\n");
+			stop = 1;
+			break;
+                default:
+                        mvwprintw(lui->bodywin, 24, 29, "Key %x is pressed\n", ch);
 		}
-		//refresh();
 		wrefresh(lui->bodywin);
-		wrefresh(lui->menuwin);
 	}
 	debug("Returning from ui_loop\n");
 }
 
 int teardown_first_screen(ban_ui_t *lui)
 {
-	/* Un post form and free the memory */
-
-	for (int i = 0; i < lui->numitems; i++)
-		free_item(lui->itms[i]);
-
-	free_menu(lui->menu);
-
-	delwin(lui->menuwin);
 	delwin(lui->bodywin);
 
 	/* remove menus and also free lui */
-	free(lui->itms);
 	free(lui);
 
 	endwin();
