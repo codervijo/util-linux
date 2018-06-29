@@ -180,6 +180,7 @@ ban_ui_t *setup_first_screen(void)
 	
 	lui->itms = (ITEM **)calloc(lui->numitems, sizeof(ITEM *));
 	assert(lui->itms != NULL);
+        //attron(COLOR_PAIR(2)); DOESNT WORK
 	lui->itms[0] = new_item(DONE_TEXT, DONE_TEXT);
 	//lui->itms[1] = new_item(CANCEL_TEXT, CANCEL_TEXT);
 	lui->itms[1] = (ITEM*)NULL;
@@ -238,6 +239,10 @@ void run_ui_loop(ban_ui_t *lui)
 		case KEY_UP:
 			menu_driver(lui->menu, REQ_PREV_ITEM);
 			break;
+                case 27:
+                        debug("Escaping to shell\n");
+                        stop = 1;
+                        break;
 		case 10:
 			if (button_handle(current_item(lui->menu)) == 1) {
 			    stop = 1;
