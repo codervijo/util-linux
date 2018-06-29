@@ -127,8 +127,8 @@ FILE *dbf;
 #define DEFAULT_WINDOW_START_COL                        0
 #define MENU_WINDOW_HEIGHT                              5
 #define MENU_WINDOW_WIDTH                              20
-#define MENU_WINDOW_START_ROW                          14
-#define MENU_WINDOW_START_COL                    (COLS/2)-10
+#define MENU_WINDOW_START_ROW                   (LINES/2)-5
+#define MENU_WINDOW_START_COL                    (COLS/2)-14
 
 #define DONE_TEXT                         "Start Install"
 #define CANCEL_TEXT                       "Exit To Shell"
@@ -166,6 +166,7 @@ ban_ui_t *setup_first_screen(void)
 	lui->numitems  = NUM_ITEMS;
 	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
 	assert(lui->bodywin != NULL);
+        wbkgd(lui->bodywin, COLOR_PAIR(1));
 
 	lui->menuwin = derwin(lui->bodywin, MENU_WINDOW_HEIGHT, MENU_WINDOW_WIDTH, MENU_WINDOW_START_ROW, MENU_WINDOW_START_COL);
 	assert(lui->menuwin != NULL);
