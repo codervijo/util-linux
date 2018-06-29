@@ -118,22 +118,12 @@ FILE *dbf;
 # define debug(s) do { ; } while (0)
 #endif
 
-#define NUM_ITEMS                                       3
-
 #define DEFAULT_WIN_WIDTH                            COLS
 #define DEFAULT_WIN_HEIGHT                          LINES
 #define DEFAULT_WINDOW_START_ROW                        0
 #define DEFAULT_WINDOW_START_COL                        0
-#define MENU_WINDOW_HEIGHT                              5
-#define MENU_WINDOW_WIDTH                              60
-#define MENU_WINDOW_START_ROW                   (LINES/2)-3
-#define MENU_WINDOW_START_COL                    (COLS/2)-14
-
-#define DONE_TEXT                 "Press Enter to start Install"
-#define CANCEL_TEXT                       "Exit To Shell"
 
 typedef struct ban_ui_s {
-	int      numitems;
 	WINDOW  *bodywin;
         WINDOW  *borderwin;
 } ban_ui_t;
@@ -152,7 +142,7 @@ ban_ui_t *setup_first_screen(void)
 	start_color();
 	cbreak();
 	curs_set(0);
-	noecho();
+	//noecho();
 	keypad(stdscr, TRUE);
 
 	init_pair(1, COLOR_YELLOW, COLOR_BLUE);    /* Window background */
@@ -160,7 +150,6 @@ ban_ui_t *setup_first_screen(void)
         init_pair(3, COLOR_WHITE,  COLOR_YELLOW);
 
 	lui   = xmalloc(sizeof(ban_ui_t));
-	lui->numitems  = NUM_ITEMS;
 	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
 	assert(lui->bodywin != NULL);
         wbkgd(lui->bodywin, COLOR_PAIR(1));
@@ -176,7 +165,6 @@ ban_ui_t *setup_first_screen(void)
         mvwprintw(lui->bodywin, LINES/2-2, COLS/2-20, "Please press ");
         wattron(lui->bodywin, COLOR_PAIR(3));
         wprintw(lui->bodywin, "Enter");
-        wattroff(lui->bodywin, A_REVERSE);
         wattron(lui->bodywin, COLOR_PAIR(2));
         wprintw(lui->bodywin, " to start install.....");
 
@@ -195,16 +183,16 @@ void run_ui_loop(ban_ui_t *lui)
 	int stop = 0;
 
 	curs_set(1);
-        wmove(lui->bodywin, LINES/2-2, COLS/2-20+13);
+        wmove(lui->bodywin, LINES/2-2, COLS/2-20+13); /* Move curser under 'E' of 'Enter' */
 	/* Loop through to get user requests */
-	while (stop != 1 )
+	while (stop != 1)
 	{
                 ch = wgetch(lui->bodywin);
 		printw("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
                 ch2 = getch();
 		printw("Got ch: %x, UP is %x down %x\n", ch2, KEY_UP, KEY_DOWN);
 		switch(ch) {
-                case 27:
+                case 57:
                         debug("Escaping to shell\n");
                         stop = 1;
                         break;
@@ -367,7 +355,7 @@ static void init_tty(struct ban_context *cxt)
 	//tcsetattr(0, TCSANOW, &ttt);
 
 	/* open stdin,stdout,stderr to the tty */
-//	open_tty(cxt->tty_path);
+        //	open_tty(cxt->tty_path);
 
 	/* restore tty modes */
 	tcsetattr(0, TCSAFLUSH, &tt);
