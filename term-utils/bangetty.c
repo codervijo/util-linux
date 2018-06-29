@@ -127,7 +127,7 @@ FILE *dbf;
 #define DEFAULT_WINDOW_START_COL                        0
 #define MENU_WINDOW_HEIGHT                              5
 #define MENU_WINDOW_WIDTH                              20
-#define MENU_WINDOW_START_ROW                   (LINES/2)-5
+#define MENU_WINDOW_START_ROW                   (LINES/2)-3
 #define MENU_WINDOW_START_COL                    (COLS/2)-14
 
 #define DONE_TEXT                         "Start Install"
@@ -138,6 +138,7 @@ typedef struct ban_ui_s {
 	ITEM   **itms;
 	MENU    *menu;
 	WINDOW  *bodywin;
+        WINDOW  *borderwin;
 	WINDOW  *menuwin;
 } ban_ui_t;
 
@@ -159,14 +160,19 @@ ban_ui_t *setup_first_screen(void)
 	noecho();
 	keypad(stdscr, TRUE);
 
-	init_pair(1, COLOR_WHITE, COLOR_BLUE);
-	init_pair(2, COLOR_WHITE, COLOR_BLUE);
+	init_pair(1, COLOR_WHITE, COLOR_BLUE);    /* Window background */
+	init_pair(2, COLOR_YELLOW, COLOR_WHITE);  /* Text to make it obvious */
 
 	lui   = xmalloc(sizeof(ban_ui_t));
 	lui->numitems  = NUM_ITEMS;
 	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
 	assert(lui->bodywin != NULL);
         wbkgd(lui->bodywin, COLOR_PAIR(1));
+
+        /* Create a border with some margin around the main window */
+        lui->borderwin = derwin(lui->bodywin, DEFAULT_WIN_HEIGHT-10, DEFAULT_WIN_WIDTH-20, 5, 10);
+        assert(lui->borderwin != NULL);
+        box(lui->borderwin, 0, 0);
 
 	lui->menuwin = derwin(lui->bodywin, MENU_WINDOW_HEIGHT, MENU_WINDOW_WIDTH, MENU_WINDOW_START_ROW, MENU_WINDOW_START_COL);
 	assert(lui->menuwin != NULL);
@@ -175,10 +181,10 @@ ban_ui_t *setup_first_screen(void)
 	lui->itms = (ITEM **)calloc(lui->numitems, sizeof(ITEM *));
 	assert(lui->itms != NULL);
 	lui->itms[0] = new_item(DONE_TEXT, DONE_TEXT);
-	lui->itms[1] = new_item(CANCEL_TEXT, CANCEL_TEXT);
-	lui->itms[2] = (ITEM*)NULL;
+	//lui->itms[1] = new_item(CANCEL_TEXT, CANCEL_TEXT);
+	lui->itms[1] = (ITEM*)NULL;
 	assert(lui->itms[0] != NULL);
-	assert(lui->itms[1] != NULL);
+	//assert(lui->itms[1] != NULL);
 
 	keypad(lui->menuwin, TRUE);
 	lui->menu = new_menu((ITEM **)lui->itms);
@@ -192,6 +198,7 @@ ban_ui_t *setup_first_screen(void)
 	post_menu(lui->menu);
 	//refresh();
 	wrefresh(lui->bodywin);
+        wrefresh(lui->borderwin);
 	wrefresh(lui->menuwin);
 
 	return lui;
