@@ -493,7 +493,7 @@ static void log_syslog(struct ban_context *cxt)
  * Detach the controlling terminal, fork, restore syslog stuff, and create
  * a new session.
  */
-static void fork_session(struct ban_context *cxt)
+static void fork_session()
 {
 	struct sigaction sa, oldsa_hup, oldsa_term;
 
@@ -635,7 +635,6 @@ void login_now(int startsh, int argc, char **argv)
 	memset(cxt.username, 0, 10);
 	strcpy(cxt.username, "root");
 	debug("set username to root");
-	sleep(10);
 
 #if 0
 	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
@@ -693,7 +692,7 @@ void login_now(int startsh, int argc, char **argv)
 	 * Detach the controlling terminal, fork, and create a new session
 	 * and reinitialize syslog stuff.
 	 */
-	fork_session(&cxt);
+	fork_session();
 	debug("fork done\n");
 
 	/* discard permissions last so we can't get killed and drop core */
@@ -987,9 +986,6 @@ static void termio_clear(int fd)
 /* Initialize termios settings. */
 static void termio_init(struct ban_context *op, struct termios *tp)
 {
-	speed_t ispeed = 0, ospeed = 0; // XXX WRONG!!
-	struct winsize ws;
-
 	if (op->flags & F_VCONSOLE) {
 		setlocale(LC_CTYPE, "POSIX");
 		//op->flags &= ~F_UTF8; VIJO -> FIXME
