@@ -186,15 +186,8 @@ int run_ui_loop(ban_ui_t *lui)
         
 	while (stop != 1)
 	{
-                //nodelay(lui->bodywin, TRUE);
-		//mvwprintw(lui->bodywin, 1, 1, "Waiting to get keyboard entry");
-                //ch = mvwgetch(lui->bodywin, LINES/2-2, COLS/2-20+13);
-                echo();
                 ch = wgetch(lui->bodywin);
-                //ch = getch();
-		mvwprintw(lui->bodywin, 1, 1, "Got ch %x", ch);
-                //ch2 = getch();
-		//printw(lui->bodywin, "Got ch: %x, UP is %x down %x\n", ch2, KEY_UP, KEY_DOWN);
+		//mvwprintw(lui->bodywin, 1, 1, "Got ch %x", ch);
 		switch (ch) {
                 case 'q':
                 case 'Q':
