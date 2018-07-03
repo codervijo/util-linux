@@ -68,7 +68,7 @@
 
 #define	TTYGRPNAME	     	"tty"	/* name of group to own ttys */
 #define VCS_PATH_MAX		  64
-#define PRG_NAME       "bangetty"
+#define PRG_NAME           "bangetty"
 
 /*
  * Main control struct
@@ -76,30 +76,25 @@
 struct ban_context {
 	const char	    *tty_path;	           /* ttyname() return value */
 	const char	    *tty_name;	           /* tty_path without /dev prefix */
-	const char	    *tty_number;	       /* end of the tty_path */
+	const char	    *tty_number;	   /* end of the tty_path */
 	mode_t		     tty_mode;	           /* chmod() mode */
 	char		    *username;	           /* from command line or PAM */
-	struct passwd   *pwd;	               /* user info */
+	struct passwd       *pwd;	           /* user info */
 	char		    *pwdbuf;	           /* pwd strings */
 	pid_t		     pid;
-	int              flags;			/* toggle switches, see below */
-	char            *tty;			    /* name of tty */
-	char            *term;	    		/* terminal type */
+	int                  flags;	  	   /* toggle switches, see below */
+	char                *tty;		   /* name of tty */
+	char                *term;	    	   /* terminal type */
 };
 
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
 #define F_VCONSOLE	   (1<<12)	/* This is a virtual console */
-
-#define serial_tty_option(opt, flag)	\
-	(((opt)->flags & (F_VCONSOLE|(flag))) == (flag))
 
 static void parse_args(int argc, char **argv, struct ban_context *op);
 static void update_utmp(struct ban_context *op);
 static void open_tty(char *tty, struct termios *tp, struct ban_context *op);
 static void termio_init(struct ban_context *op, struct termios *tp);
 static void reset_vc (const struct ban_context *op, struct termios *tp);
-static void termio_final(struct ban_context *op,
-						 struct termios *tp, struct chardata *cp);
 static void usage(void) __attribute__((__noreturn__));
 static void exit_slowly(int code) __attribute__((__noreturn__));
 static void log_err(const char *, ...) __attribute__((__noreturn__))
@@ -118,10 +113,10 @@ FILE *dbf;
 # define debug(s) do { ; } while (0)
 #endif
 
-#define DEFAULT_WIN_WIDTH                            COLS
-#define DEFAULT_WIN_HEIGHT                          LINES
-#define DEFAULT_WINDOW_START_ROW                        0
-#define DEFAULT_WINDOW_START_COL                        0
+#define DEFAULT_WIN_WIDTH          COLS
+#define DEFAULT_WIN_HEIGHT        LINES
+#define DEFAULT_WINDOW_START_ROW      0
+#define DEFAULT_WINDOW_START_COL      0
 
 typedef struct ban_ui_s {
 	WINDOW  *bodywin;
@@ -129,9 +124,9 @@ typedef struct ban_ui_s {
 } ban_ui_t;
 
 ban_ui_t *setup_first_screen(void);
-void run_ui_loop(ban_ui_t *lui);
+int  run_ui_loop(ban_ui_t *lui);
 int  teardown_first_screen(ban_ui_t *lui);
-void login_now(int argc, char **argv);
+void login_now(int startsh, int argc, char **argv);
 
 ban_ui_t *setup_first_screen(void)
 {
@@ -140,10 +135,9 @@ ban_ui_t *setup_first_screen(void)
 	/* Initialize curses */
 	initscr();
 	start_color();
-	cbreak();
+	//cbreak();
 	curs_set(0);
-	//noecho();
-	keypad(stdscr, TRUE);
+	noecho();
 
 	init_pair(1, COLOR_YELLOW, COLOR_BLUE);    /* Window background */
 	init_pair(2, COLOR_YELLOW, COLOR_BLUE);  /* Text to make it obvious */
@@ -164,48 +158,62 @@ ban_ui_t *setup_first_screen(void)
         wattron(lui->bodywin, COLOR_PAIR(2));
         mvwprintw(lui->bodywin, LINES/2-2, COLS/2-20, "Please press ");
         wattron(lui->bodywin, COLOR_PAIR(3));
+        wattron(lui->bodywin, A_STANDOUT);
         wprintw(lui->bodywin, "Enter");
+        wattroff(lui->bodywin, A_STANDOUT);
         wattron(lui->bodywin, COLOR_PAIR(2));
         wprintw(lui->bodywin, " to start install.....");
 
+	keypad(stdscr, TRUE);
         keypad(lui->bodywin, TRUE);
 
+        refresh();
 	wrefresh(lui->bodywin);
         wrefresh(lui->borderwin);
 
 	return lui;
 }
 
-
-void run_ui_loop(ban_ui_t *lui)
+/*  returns 1 to spawn shell, 0 to execute argv[1] */
+int run_ui_loop(ban_ui_t *lui)
 {
-	int ch, ch2;
+	int ch, ret = 0;
 	int stop = 0;
 
 	curs_set(1);
-        wmove(lui->bodywin, LINES/2-2, COLS/2-20+13); /* Move curser under 'E' of 'Enter' */
-	/* Loop through to get user requests */
+        wmove(lui->bodywin, LINES/2-2, COLS/2-20+13); /* Move cursor under 'E' of 'Enter' */
+        nodelay(lui->bodywin, FALSE);
+        
 	while (stop != 1)
 	{
+                //nodelay(lui->bodywin, TRUE);
+		//mvwprintw(lui->bodywin, 1, 1, "Waiting to get keyboard entry");
+                //ch = mvwgetch(lui->bodywin, LINES/2-2, COLS/2-20+13);
+                echo();
                 ch = wgetch(lui->bodywin);
-		printw("Got ch: %x, UP is %x down %x\n", ch, KEY_UP, KEY_DOWN);
-                ch2 = getch();
-		printw("Got ch: %x, UP is %x down %x\n", ch2, KEY_UP, KEY_DOWN);
-		switch(ch) {
-                case 57:
+                //ch = getch();
+		mvwprintw(lui->bodywin, 1, 1, "Got ch %x", ch);
+                //ch2 = getch();
+		//printw(lui->bodywin, "Got ch: %x, UP is %x down %x\n", ch2, KEY_UP, KEY_DOWN);
+		switch (ch) {
+                case 'q':
+                case 'Q':
+                case 27:
                         debug("Escaping to shell\n");
                         stop = 1;
+                        ret = 1;
                         break;
 		case 10:
 	                debug("Should exit now, trying...\n");
 			stop = 1;
 			break;
                 default:
-                        mvwprintw(lui->bodywin, 24, 29, "Key %x is pressed\n", ch);
+                        mvwprintw(lui->bodywin,4, 9, "Key %x is pressed", ch);
 		}
 		wrefresh(lui->bodywin);
 	}
 	debug("Returning from ui_loop\n");
+        return ret;
 }
 
 int teardown_first_screen(ban_ui_t *lui)
@@ -610,7 +618,7 @@ static void init_environ(struct ban_context *cxt)
 }
 
 
-void login_now(int argc, char **argv)
+void login_now(int startsh, int argc, char **argv)
 {
 	char *childArgv[10];
 	char *buff;
@@ -714,7 +722,7 @@ void login_now(int argc, char **argv)
         childArgc              = 0;
 	childArgv[childArgc++] = "/bin/sh";
 	childArgv[childArgc++] = "-sh";
-	if (argc > 1) {
+	if (startsh == 0 && argc > 1) {
 		debug("handling argc\n");
                 printf("%d arguments are {%s}-{%s}\n", argc, argv[0], argv[1]);
 		buff = xmalloc(strlen(argv[1]) + 6);
@@ -869,82 +877,67 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 {
 	const pid_t pid = getpid();
 	int closed = 0;
-	int serial;
+        int serial;
+        int fd;
+	pid_t tid;
+	gid_t gid = 0;
+	struct stat st;
 
 	/* Set up new standard input, unless we are given an already opened port. */
+ 
+	/* Open the tty as standard input. */
+	if ((fd = open(tty, O_RDWR|O_NOCTTY|O_NONBLOCK, 0)) < 0)
+		log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
 
-	if (strcmp(tty, "-") != 0) {
-		char buf[PATH_MAX+1];
-		struct group *gr = NULL;
-		struct stat st;
-		int fd, len;
-		pid_t tid;
-		gid_t gid = 0;
-
-		/* Use tty group if available */
-		if ((gr = getgrnam("tty")))
-			gid = gr->gr_gid;
-
-		len = snprintf(buf, sizeof(buf), "/dev/%s", tty);
-		if (len < 0 || (size_t)len >= sizeof(buf))
-			log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
-
-		/* Open the tty as standard input. */
-		if ((fd = open(buf, O_RDWR|O_NOCTTY|O_NONBLOCK, 0)) < 0)
-			log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
-
-		/*
-		 * There is always a race between this reset and the call to
-		 * vhangup() that s.o. can use to get access to your tty.
-		 * Linux login(1) will change tty permissions. Use root owner and group
-		 * with permission -rw------- for the period between getty and login.
-		 */
-		if (fchown(fd, 0, gid) || fchmod(fd, (gid ? 0620 : 0600))) {
-			if (errno == EROFS)
-				log_warn("%s: %m", buf);
-			else
-				log_err("%s: %m", buf);
-		}
-
-		/* Sanity checks... */
-		if (fstat(fd, &st) < 0)
-			log_err("%s: %m", buf);
-		if ((st.st_mode & S_IFMT) != S_IFCHR)
-			log_err(_("/dev/%s: not a character device"), tty);
-		if (!isatty(fd))
-			log_err(_("/dev/%s: not a tty"), tty);
-
-		if (((tid = tcgetsid(fd)) < 0) || (pid != tid)) {
-			if (ioctl(fd, TIOCSCTTY, 1) == -1)
-				log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
-		}
-
-		close(STDIN_FILENO);
-		errno = 0;
-
-
-		close(fd);
-
-		debug("open(2)\n");
-		if (open(buf, O_RDWR|O_NOCTTY|O_NONBLOCK, 0) != 0)
-			log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
-
-		if (((tid = tcgetsid(STDIN_FILENO)) < 0) || (pid != tid)) {
-			if (ioctl(STDIN_FILENO, TIOCSCTTY, 1) == -1)
-				log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
-		}
-
-	} else {
-
-		/*
-		 * Standard input should already be connected to an open port. Make
-		 * sure it is open for read/write.
-		 */
-
-		if ((fcntl(STDIN_FILENO, F_GETFL, 0) & O_RDWR) != O_RDWR)
-			log_err(_("%s: not open for read/write"), tty);
-
+	/*
+	 * There is always a race between this reset and the call to
+	 * vhangup() that s.o. can use to get access to your tty.
+	 * Linux login(1) will change tty permissions. Use root owner and group
+	 * with permission -rw------- for the period between getty and login.
+	 */
+	if (fchown(fd, 0, gid) || fchmod(fd, (gid ? 0620 : 0600))) {
+		if (errno == EROFS)
+			log_warn("%s: %m", tty);
+		else
+			log_err("%s: %m", tty);
 	}
+
+	/* Sanity checks... */
+	if (fstat(fd, &st) < 0)
+		log_err("%s: %m", tty);
+	if ((st.st_mode & S_IFMT) != S_IFCHR)
+		log_err(_("/dev/%s: not a character device"), tty);
+	if (!isatty(fd))
+		log_err(_("/dev/%s: not a tty"), tty);
+
+	if (((tid = tcgetsid(fd)) < 0) || (pid != tid)) {
+		if (ioctl(fd, TIOCSCTTY, 1) == -1)
+			log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
+	}
+
+	close(STDIN_FILENO);
+	errno = 0;
+
+	close(fd);
+
+	debug("open(2)\n");
+	if (open(tty, O_RDWR|O_NOCTTY|O_NONBLOCK, 0) != 0)
+		log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
+
+	if (((tid = tcgetsid(STDIN_FILENO)) < 0) || (pid != tid)) {
+		if (ioctl(STDIN_FILENO, TIOCSCTTY, 1) == -1)
+			log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
+	}
+
+
+	/*
+	 * Standard input should already be connected to an open port. Make
+	 * sure it is open for read/write.
+	 */
+
+	if ((fcntl(STDIN_FILENO, F_GETFL, 0) & O_RDWR) != O_RDWR)
+		log_err(_("%s: not open for read/write"), tty);
+
 
 	if (tcsetpgrp(STDIN_FILENO, pid))
 		log_warn(_("/dev/%s: cannot set process group: %m"), tty);
@@ -1012,54 +1005,9 @@ static void termio_init(struct ban_context *op, struct termios *tp)
 		termio_clear(STDOUT_FILENO);
 		return;
 	}
-
-	/*
-	 * Initial termios settings: 8-bit characters, raw-mode, blocking i/o.
-	 * Special characters are set after we have read the login name; all
-	 * reads will be done in raw mode anyway. Errors will be dealt with
-	 * later on.
-	 */
-
-	tp->c_iflag = 0;
-	tp->c_oflag &= OPOST | ONLCR;
-
-	if ((op->flags & F_KEEPCFLAGS) == 0)
-		tp->c_cflag = CS8 | HUPCL | CREAD;
-
-	/*
-	 * Note that the speed is stored in the c_cflag termios field, so we have
-	 * set the speed always when the cflag is reset.
-	 */
-	cfsetispeed(tp, ispeed);
-	cfsetospeed(tp, ospeed);
-
-#ifdef HAVE_STRUCT_TERMIOS_C_LINE
-	tp->c_line = 0;
-#endif
-	tp->c_cc[VMIN] = 1;
-	tp->c_cc[VTIME] = 0;
-
-	/* Check for terminal size and if not found set default */
-	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0) {
-		if (ws.ws_row == 0)
-			ws.ws_row = 24;
-		if (ws.ws_col == 0)
-			ws.ws_col = 80;
-		if (ioctl(STDIN_FILENO, TIOCSWINSZ, &ws))
-			debug("TIOCSWINSZ ioctl failed\n");
-	}
-
-	 /* Flush input and output queues, important for modems! */
-	tcflush(STDIN_FILENO, TCIOFLUSH);
-
-	if (tcsetattr(STDIN_FILENO, TCSANOW, tp))
-		log_warn(_("setting terminal attributes failed: %m"));
-
-	/* Go to blocking input even in local mode. */
-	fcntl(STDIN_FILENO, F_SETFL,
-		  fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
-
+        /* *ngetty is to be used only on vc */
 	debug("term_io 2\n");
+        log_err("This getty doesn't not support anything other than virtual consoles\n");
 }
 
 /* Reset virtual console on stdin to its defaults */
@@ -1067,6 +1015,7 @@ static void reset_vc(const struct ban_context *op, struct termios *tp)
 {
 	int fl = 0;
 
+        debug("Resetting Virtual console(VC)..");
 	fl |= (op->flags & F_KEEPCFLAGS) == 0 ? 0 : UL_TTY_KEEPCFLAGS;
 
 	reset_virtual_console(tp, fl);
@@ -1077,74 +1026,7 @@ static void reset_vc(const struct ban_context *op, struct termios *tp)
 	/* Go to blocking input even in local mode. */
 	fcntl(STDIN_FILENO, F_SETFL,
 		  fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
-}
-
-
-/* Set the final tty mode bits. */
-static void termio_final(struct ban_context *op, struct termios *tp, struct chardata *cp)
-{
-	/* General terminal-independent stuff. */
-
-	/* 2-way flow control */
-	tp->c_iflag |= IXON | IXOFF;
-	tp->c_lflag |= ICANON | ISIG | ECHO | ECHOE | ECHOK | ECHOKE;
-	/* no longer| ECHOCTL | ECHOPRT */
-	tp->c_oflag |= OPOST;
-	/* tp->c_cflag = 0; */
-	tp->c_cc[VINTR] = DEF_INTR;
-	tp->c_cc[VQUIT] = DEF_QUIT;
-	tp->c_cc[VEOF] = DEF_EOF;
-	tp->c_cc[VEOL] = DEF_EOL;
-#ifdef __linux__
-	tp->c_cc[VSWTC] = DEF_SWITCH;
-#elif defined(VSWTCH)
-	tp->c_cc[VSWTCH] = DEF_SWITCH;
-#endif				/* __linux__ */
-
-	/* Account for special characters seen in input. */
-	if (cp->eol == CR) {
-		tp->c_iflag |= ICRNL;
-		tp->c_oflag |= ONLCR;
-	}
-	tp->c_cc[VERASE] = cp->erase;
-	tp->c_cc[VKILL] = cp->kill;
-
-	/* Account for the presence or absence of parity bits in input. */
-	switch (cp->parity) {
-	case 0:
-		/* space (always 0) parity */
-		break;
-	case 1:
-		/* odd parity */
-		tp->c_cflag |= PARODD;
-		/* fallthrough */
-	case 2:
-		/* even parity */
-		tp->c_cflag |= PARENB;
-		tp->c_iflag |= INPCK | ISTRIP;
-		/* fallthrough */
-	case (1 | 2):
-		/* no parity bit */
-		tp->c_cflag &= ~CSIZE;
-		tp->c_cflag |= CS7;
-		break;
-	}
-	/* Account for upper case without lower case. */
-	if (cp->capslock) {
-#ifdef IUCLC
-		tp->c_iflag |= IUCLC;
-#endif
-#ifdef XCASE
-		tp->c_lflag |= XCASE;
-#endif
-#ifdef OLCUC
-		tp->c_oflag |= OLCUC;
-#endif
-	}
-
-	/* Finally, make the new settings effective. */
-	if (tcsetattr(STDIN_FILENO, TCSANOW, tp) < 0)
-		log_err(_("%s: failed to set terminal attributes: %m"), op->tty);
+        debug("..completed");
 }
 
 static void __attribute__((__noreturn__)) usage(void)
@@ -1201,10 +1083,11 @@ static void log_warn(const char *fmt, ...)
 
 int main(int argc, char **argv)
 {
+        int    startsh;
 	struct chardata chardata;		/* will be set by get_logname() */
 	struct termios termios;			/* terminal mode bits */
 	struct ban_context options = {
-		.tty    = "tty1"		/* default tty line */
+		.tty    = "/dev/tty1"		/* default tty line */
 	};
 	struct sigaction sa, sa_hup, sa_quit, sa_int;
 	sigset_t set;
@@ -1266,24 +1149,17 @@ int main(int argc, char **argv)
 
 	INIT_CHARDATA(&chardata);
 
-	if ((options.flags & F_VCONSOLE) == 0) {
-		/* Finalize the termios settings. */
-		termio_final(&options, &termios, &chardata);
-
-		/* Now the newline character should be properly written. */
-		write_all(STDOUT_FILENO, "\r\n", 2);
-	}
-
 	sigaction(SIGQUIT, &sa_quit, NULL);
 	sigaction(SIGINT, &sa_int, NULL);
 
+        startsh = 0;
 	lui = setup_first_screen();
-	run_ui_loop(lui);
+	startsh = run_ui_loop(lui);
 	teardown_first_screen(lui);
         debug("Tore down UI screen, next login_now()\n");
 
 	/* Also updates utmp */
-	login_now(argc, argv);
+	login_now(startsh, argc, argv);
 #ifdef DEBUGGING
 	if (close_stream(dbf) != 0)
 		log_err("write failed: %s", DEBUG_OUTPUT);
