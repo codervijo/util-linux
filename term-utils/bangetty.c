@@ -74,7 +74,7 @@
  * Main control struct
  */
 struct ban_context {
-	const char	    *tty_path;	           /* ttyname() return value */
+	char	            *tty_path;	           /* ttyname() return value */
 	const char	    *tty_name;	           /* tty_path without /dev prefix */
 	const char	    *tty_number;	   /* end of the tty_path */
 	mode_t		     tty_mode;	           /* chmod() mode */
@@ -319,9 +319,10 @@ static void init_tty(struct ban_context *cxt)
 {
 	struct stat st;
 	struct termios tt, ttt;
+#define BAN_TTY "/dev/tty1"
 
-        cxt->tty_path   = xmalloc(strlen("/dev/tty1"));
-	xstrncpy(cxt->tty_path, "/dev/tty1", sizeof("/dev/tty1"));
+        cxt->tty_path   = xmalloc(strlen(BAN_TTY));
+	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
         cxt->tty_name   = cxt->tty_path + 3;
         cxt->tty_number = cxt->tty_path + 8; 
 
@@ -493,7 +494,7 @@ static void log_syslog(struct ban_context *cxt)
  * Detach the controlling terminal, fork, restore syslog stuff, and create
  * a new session.
  */
-static void fork_session()
+static void fork_session(void)
 {
 	struct sigaction sa, oldsa_hup, oldsa_term;
 
@@ -712,7 +713,7 @@ void login_now(int startsh, int argc, char **argv)
 	}
 
         childArgc              = 0;
-	childArgv[childArgc++] = "/bin/sh";
+	childArgv[childArgc++] = "/bin/bash";
 	childArgv[childArgc++] = "-sh";
 	if (startsh == 0 && argc > 1) {
 		debug("handling argc\n");
