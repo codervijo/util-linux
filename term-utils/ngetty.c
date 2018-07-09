@@ -22,37 +22,22 @@
 #include <utmpx.h>
 #include <getopt.h>
 #include <time.h>
-#include <sys/socket.h>
-#include <langinfo.h>
 #include <pwd.h>
 #include <grp.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <ifaddrs.h>
-#include <net/if.h>
+#include <pathnames.h>
 #include <sys/utsname.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <form.h>
+#include <assert.h>
 
 #include "strutils.h"
 #include "all-io.h"
-#include "nls.h"
-#include "pathnames.h"
-#include "c.h"
-#include "widechar.h"
 #include "ttyutils.h"
-#include "color-names.h"
 #include "env.h"
-#include "setproctitle.h"
-#include "env.h"
+//#include "setproctitle.h"
 #include "xalloc.h"
-#include "all-io.h"
-#include "fileutils.h"
 #include "pwdutils.h"
-
-#ifdef USE_PLYMOUTH_SUPPORT
-# include "plymouth-ctrl.h"
-#endif
 
 #ifdef HAVE_SYS_PARAM_H
 # include <sys/param.h>
@@ -70,107 +55,63 @@
 #  endif
 #endif
 
-#include <security/pam_appl.h>
-#ifdef HAVE_SECURITY_PAM_MISC_H
-# include <security/pam_misc.h>
-#elif defined(HAVE_SECURITY_OPENPAM_H)
-# include <security/openpam.h>
-#endif
 #include <sys/sendfile.h>
 
-/*
- * Some heuristics to find out what environment we are in: if it is not
- * System V, assume it is SunOS 4. The LOGIN_PROCESS is defined in System V
- * utmp.h, which will select System V style getty.
- */
-#ifdef LOGIN_PROCESS
-#  define SYSV_STYLE
+#define SYSV_STYLE
+#define DEBUGGING 1
+
+#ifdef DEBUGGING
+# include "closestream.h"
+# ifndef DEBUG_OUTPUT
+#  define DEBUG_OUTPUT "/dev/tty10"
+# endif
+# define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
+FILE *dbf;
+#else
+# define debug(s) do { ; } while (0)
 #endif
 
-/* Login prompt. */
-#define LOGIN		"login: "
-#define LOGIN_ARGV_MAX	16		/* Numbers of args for login */
-
-/*
- * agetty --reload
- */
-#ifdef AGETTY_RELOAD
-# include <sys/inotify.h>
-# include <linux/netlink.h>
-# include <linux/rtnetlink.h>
-# define AGETTY_RELOAD_FILENAME "/run/agetty.reload"	/* trigger file */
-# define AGETTY_RELOAD_FDNONE	-2			/* uninitialized fd */
-//static int inotify_fd = AGETTY_RELOAD_FDNONE;
-//static int netlink_fd = AGETTY_RELOAD_FDNONE;
+#ifdef USE_TTY_GROUP
+# define TTY_MODE 0620
+#else
+# define TTY_MODE 0600
 #endif
 
+#define	TTYGRPNAME	     	"tty"	/* name of group to own ttys */
+#define VCS_PATH_MAX		  64
+#define PRG_NAME           "bangetty"
+
 /*
- * When multiple baud rates are specified on the command line, the first one
- * we will try is the first one specified.
+ * Main control struct
  */
-#define	FIRST_SPEED	0
-
-/* Storage for command-line options. */
-#define	MAX_SPEED	10	/* max. nr. of baud rates */
-
-struct options {
-	int           flags;			/* toggle switches, see below */
-	unsigned int  timeout;			/* time-out period */
-	char         *tty;			    /* name of tty */
-	char         *vcline;			/* line of virtual console */
-	char         *term;	    		/* terminal type */
-	char         *issue;			/* alternative issue file or directory */
-	char         *osrelease;		/* /etc/os-release data */
-	unsigned int  delay;			/* Sleep seconds before prompt */
-	int           nice;			    /* Run login with this priority */
-	int           numspeed;			/* number of baud rates to try */
-	int           clocal;			/* CLOCAL_MODE_* */
-	int           kbmode;			/* Keyboard mode if virtual console */
+struct nlogin_context {
+	char	            *tty_path;	           /* ttyname() return value */
+	const char	    *tty_name;	           /* tty_path without /dev prefix */
+	const char	    *tty_number;	   /* end of the tty_path */
+	mode_t		     tty_mode;	           /* chmod() mode */
+	char		    *username;	           /* from command line or PAM */
+	struct passwd       *pwd;	           /* user info */
+	char		    *pwdbuf;	           /* pwd strings */
+	pid_t		     pid;
+	int                  flags;	  	   /* toggle switches, see below */
+	char                *tty;		   /* name of tty */
+	char                *term;	    	   /* terminal type */
 };
 
-enum {
-	CLOCAL_MODE_AUTO = 0,
-	CLOCAL_MODE_ALWAYS,
-	CLOCAL_MODE_NEVER
-};
-
-
-#define F_WAITCRLF	   (1<<5)	/* wait for CR or LF */
-#define F_NOPROMPT	   (1<<7)	/* do not ask for login name! */
-#define F_LCUC		   (1<<8)	/* support for *LCUC stty modes */
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
 #define F_VCONSOLE	   (1<<12)	/* This is a virtual console */
-#define F_HANGUP	   (1<<13)	/* Do call vhangup(2) */
-#define F_UTF8		   (1<<14)	/* We can do UTF8 */
-#define F_LOGINPAUSE   (1<<15)	/* Wait for any key before dropping login prompt */
-#define F_NOCLEAR	   (1<<16)  /* Do not clear the screen before prompting */
-#define F_NONL		   (1<<17)  /* No newline before issue */
-#define F_NOHINTS	   (1<<20)  /* Don't print hints */
 
-#define serial_tty_option(opt, flag)	\
-	(((opt)->flags & (F_VCONSOLE|(flag))) == (flag))
-
-static void parse_args(int argc, char **argv, struct options *op);
-static void update_utmp(struct options *op);
-static void open_tty(char *tty, struct termios *tp, struct options *op);
-static void termio_init(struct options *op, struct termios *tp);
-static void reset_vc (const struct options *op, struct termios *tp);
-//static void do_prompt(struct options *op, struct termios *tp);
-//static char *get_logname(struct options *op,
-//			             struct termios *tp, struct chardata *cp);
-static void termio_final(struct options *op,
-			             struct termios *tp, struct chardata *cp);
-//static int caps_lock(char *s);
+static void parse_args(int argc, char **argv, struct nlogin_context *op);
+static void update_utmp(struct nlogin_context *op);
+static void open_tty(char *tty, struct termios *tp, struct nlogin_context *op);
+static void termio_init(struct nlogin_context *op, struct termios *tp);
+static void reset_vc (const struct nlogin_context *op, struct termios *tp);
 static void usage(void) __attribute__((__noreturn__));
 static void exit_slowly(int code) __attribute__((__noreturn__));
 static void log_err(const char *, ...) __attribute__((__noreturn__))
-			       __attribute__((__format__(printf, 1, 2)));
+				   __attribute__((__format__(printf, 1, 2)));
 static void log_warn (const char *, ...)
 				__attribute__((__format__(printf, 1, 2)));
-//static ssize_t append(char *dest, size_t len, const char  *sep, const char *src);
-static void check_username (const char* nm);
-static void reload_agettys(void);
-static void print_issue_file(struct options *op, struct termios *tp);
 
 #ifdef DEBUGGING
 # include "closestream.h"
@@ -525,50 +466,6 @@ int teardown_login_screen(login_ui_t *lui)
     teardown_login_screen(lui);
 }*/
 
-#define is_pam_failure(_rc)	((_rc) != PAM_SUCCESS)
-
-#define LOGIN_MAX_TRIES        3
-#define LOGIN_EXIT_TIMEOUT     5
-#define LOGIN_TIMEOUT          60
-
-#ifdef USE_TTY_GROUP
-# define TTY_MODE 0620
-#else
-# define TTY_MODE 0600
-#endif
-
-#define	TTYGRPNAME	"tty"	/* name of group to own ttys */
-#define VCS_PATH_MAX	64
-
-/*
- * Login control struct
- */
-struct login_context {
-	const char	    *tty_path;	/* ttyname() return value */
-	const char	    *tty_name;	/* tty_path without /dev prefix */
-	const char	    *tty_number;	/* end of the tty_path */
-	mode_t		     tty_mode;	/* chmod() mode */
-
-	char		    *username;	/* from command line or PAM */
-	struct passwd	*pwd;		/* user info */
-	char		    *pwdbuf;	/* pwd strings */
-
-	pam_handle_t	*pamh;		/* PAM handler */
-	struct pam_conv	 conv;		/* PAM conversation */
-
-#ifdef LOGIN_CHOWN_VCS
-	char		     vcsn[VCS_PATH_MAX];	/* virtual console name */
-	char		     vcsan[VCS_PATH_MAX];
-#endif
-
-	char		    *hostname;		/* remote machine */
-	char		     hostaddress[16];	/* remote address */
-	char		    *thishost;	/* this machine */
-	char		    *thisdomain;/* this machine's domain */
-	pid_t		     pid;
-	int		         quiet;		/* 1 if hush file exists */
-	int              noauth;
-};
 
 /*
  * This bounds the time given to login.  Not a define, so it can
@@ -576,81 +473,6 @@ struct login_context {
  */
 static int child_pid = 0;
 static volatile int got_sig = 0;
-
-#ifdef LOGIN_CHOWN_VCS
-/* true if the filedescriptor fd is a console tty, very Linux specific */
-static int is_consoletty(int fd)
-{
-	struct stat stb;
-
-	if ((fstat(fd, &stb) >= 0)
-	    && (major(stb.st_rdev) == TTY_MAJOR)
-	    && (minor(stb.st_rdev) < 64)) {
-		return 1;
-	}
-	return 0;
-}
-#endif
-
-#if 0
-static char *xgethostname(void)
-{
-	char *name;
-	size_t sz = get_hostname_max() + 1;
-
-	name = malloc(sizeof(char) * sz);
-	if (!name)
-		log_err(_("failed to allocate memory: %m"));
-
-	if (gethostname(name, sz) != 0) {
-		free(name);
-		return NULL;
-	}
-	name[sz - 1] = '\0';
-	return name;
-}
-#endif
-
-
-static void __attribute__ ((__noreturn__))
-timedout2(int sig __attribute__ ((__unused__)))
-{
-	struct termios ti;
-
-	/* reset echo */
-	tcgetattr(0, &ti);
-	ti.c_lflag |= ECHO;
-	tcsetattr(0, TCSANOW, &ti);
-	_exit(EXIT_SUCCESS);	/* %% */
-}
-
-static void timedout(int sig __attribute__ ((__unused__)))
-{
-	signal(SIGALRM, timedout2);
-	alarm(10);
-	//ignore_result( write(STDERR_FILENO, timeout_msg, strlen(timeout_msg)) );
-	signal(SIGALRM, SIG_IGN);
-	alarm(0);
-	timedout2(0);
-}
-
-/*
- * This handler allows to inform a shell about signals to login. If you have
- * (root) permissions, you can kill all login children by one signal to the
- * login process.
- *
- * Also, a parent who is session leader is able (before setsid() in the child)
- * to inform the child when the controlling tty goes away (e.g. modem hangup).
- */
-static void sig_handler(int signal)
-{
-	if (child_pid)
-		kill(-child_pid, signal);
-	else
-		got_sig = 1;
-	if (signal == SIGTERM)
-		kill(-child_pid, SIGHUP);	/* because the shell often ignores SIGTERM */
-}
 
 /*
  * Let us delay all exit() calls when the user is not authenticated
@@ -661,25 +483,6 @@ static void __attribute__ ((__noreturn__)) sleepexit(int eval)
 	//sleep((unsigned int)getlogindefs_num("FAIL_DELAY", LOGIN_EXIT_TIMEOUT));
 	sleep(10);
 	exit(eval);
-}
-
-static const char *get_thishost(struct login_context *cxt, const char **domain)
-{
-	if (!cxt->thishost) {
-		cxt->thishost = xgethostname();
-		if (!cxt->thishost) {
-			if (domain)
-				*domain = NULL;
-			return NULL;
-		}
-		cxt->thisdomain = strchr(cxt->thishost, '.');
-		if (cxt->thisdomain)
-			*cxt->thisdomain++ = '\0';
-	}
-
-	if (domain)
-		*domain = cxt->thisdomain;
-	return cxt->thishost;
 }
 
 /*
@@ -702,7 +505,7 @@ static void motd(void)
 	motdlist = xstrdup(mb);
 
 	for (motdfile = strtok(motdlist, ":"); motdfile;
-	     motdfile = strtok(NULL, ":")) {
+		 motdfile = strtok(NULL, ":")) {
 
 		struct stat st;
 		int fd;
@@ -718,48 +521,6 @@ static void motd(void)
 	free(motdlist);
 }
 
-#if 0
-/*
- * Nice and simple code provided by Linus Torvalds 16-Feb-93.
- * Non-blocking stuff by Maciej W. Rozycki, macro@ds2.pg.gda.pl, 1999.
- *
- * He writes: "Login performs open() on a tty in a blocking mode.
- * In some cases it may make login wait in open() for carrier infinitely,
- * for example if the line is a simplistic case of a three-wire serial
- * connection. I believe login should open the line in non-blocking mode,
- * leaving the decision to make a connection to getty (where it actually
- * belongs)."
- */
-static void open_tty(const char *tty)
-{
-	int i, fd, flags;
-
-	fd = open(tty, O_RDWR | O_NONBLOCK);
-	if (fd == -1) {
-		syslog(LOG_ERR, _("FATAL: can't reopen tty: %m"));
-		sleepexit(EXIT_FAILURE);
-	}
-
-	if (!isatty(fd)) {
-		close(fd);
-		syslog(LOG_ERR, _("FATAL: %s is not a terminal"), tty);
-		sleepexit(EXIT_FAILURE);
-	}
-
-	flags = fcntl(fd, F_GETFL);
-	flags &= ~O_NONBLOCK;
-	fcntl(fd, F_SETFL, flags);
-
-	for (i = 0; i < fd; i++)
-		close(i);
-	for (i = 0; i < 3; i++)
-		if (fd != i)
-			dup2(fd, i);
-	if (fd >= 3)
-		close(fd);
-}
-#endif
-
 #define chown_err(_what, _uid, _gid) \
 		syslog(LOG_ERR, _("chown (%s, %lu, %lu) failed: %m"), \
 			(_what), (unsigned long) (_uid), (unsigned long) (_gid))
@@ -767,7 +528,7 @@ static void open_tty(const char *tty)
 #define chmod_err(_what, _mode) \
 		syslog(LOG_ERR, _("chmod (%s, %u) failed: %m"), (_what), (_mode))
 
-static void chown_tty(struct login_context *cxt)
+static void chown_tty(struct nlogin_context *cxt)
 {
 	const char *grname, *gidstr;
 	uid_t uid = cxt->pwd->pw_uid;
@@ -780,42 +541,28 @@ static void chown_tty(struct login_context *cxt)
 			gid = gr->gr_gid;
 		else {	/* group by ID */
 			gidstr = getenv("TTYGROUP");
-            gid    = (gid_t) atoi(gidstr);
-        }
+			gid    = (gid_t) atoi(gidstr);
+		}
 	}
 	if (fchown(0, uid, gid))				/* tty */
 		chown_err(cxt->tty_name, uid, gid);
 	if (fchmod(0, cxt->tty_mode))
 		chmod_err(cxt->tty_name, cxt->tty_mode);
-
-#ifdef LOGIN_CHOWN_VCS
-	if (is_consoletty(0)) {
-		if (chown(cxt->vcsn, uid, gid))			/* vcs */
-			chown_err(cxt->vcsn, uid, gid);
-		if (chmod(cxt->vcsn, cxt->tty_mode))
-			chmod_err(cxt->vcsn, cxt->tty_mode);
-
-		if (chown(cxt->vcsan, uid, gid))		/* vcsa */
-			chown_err(cxt->vcsan, uid, gid);
-		if (chmod(cxt->vcsan, cxt->tty_mode))
-			chmod_err(cxt->vcsan, cxt->tty_mode);
-	}
-#endif
 }
 
 /*
  * Reads the current terminal path and initializes cxt->tty_* variables.
  */
-static void init_tty(struct login_context *cxt)
+static void init_tty(struct nlogin_context *cxt)
 {
-    char *ttymodestr;
 	struct stat st;
 	struct termios tt, ttt;
+#define BAN_TTY "/dev/tty1"
 
-	ttymodestr    = getenv("TTYPERM");
-    cxt->tty_mode = (mode_t) atoi(ttymodestr);
-
-	get_terminal_name(&cxt->tty_path, &cxt->tty_name, &cxt->tty_number);
+        cxt->tty_path   = xmalloc(strlen(BAN_TTY));
+	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
+        cxt->tty_name   = cxt->tty_path + 3;
+        cxt->tty_number = cxt->tty_path + 8; 
 
 	/*
 	 * In case login is suid it was possible to use a hardlink as stdin
@@ -826,125 +573,35 @@ static void init_tty(struct login_context *cxt)
 	 * All of this is a problem only when login is suid, which it isn't.
 	 */
 	if (!cxt->tty_path || !*cxt->tty_path ||
-	    lstat(cxt->tty_path, &st) != 0 || !S_ISCHR(st.st_mode) ||
-	    (st.st_nlink > 1 && strncmp(cxt->tty_path, "/dev/", 5)) ||
-	    access(cxt->tty_path, R_OK | W_OK) != 0) {
+		lstat(cxt->tty_path, &st) != 0 || !S_ISCHR(st.st_mode) ||
+		(st.st_nlink > 1 && strncmp(cxt->tty_path, "/dev/", 5)) ||
+		access(cxt->tty_path, R_OK | W_OK) != 0) {
 
 		syslog(LOG_ERR, _("FATAL: bad tty"));
 		sleepexit(EXIT_FAILURE);
 	}
-
-#ifdef LOGIN_CHOWN_VCS
-	if (cxt->tty_number) {
-		/* find names of Virtual Console devices, for later mode change */
-		snprintf(cxt->vcsn, sizeof(cxt->vcsn), "/dev/vcs%s", cxt->tty_number);
-		snprintf(cxt->vcsan, sizeof(cxt->vcsan), "/dev/vcsa%s", cxt->tty_number);
-	}
-#endif
 
 	tcgetattr(0, &tt);
 	ttt = tt;
 	ttt.c_cflag &= ~HUPCL;
 
 	if ((fchown(0, 0, 0) || fchmod(0, cxt->tty_mode)) && errno != EROFS) {
-
 		syslog(LOG_ERR, _("FATAL: %s: change permissions failed: %m"),
 				cxt->tty_path);
 		sleepexit(EXIT_FAILURE);
 	}
 
 	/* Kill processes left on this tty */
-	tcsetattr(0, TCSANOW, &ttt);
-
-	/*
-	 * Let's close file descriptors before vhangup
-	 * https://lkml.org/lkml/2012/6/5/145
-	 */
-	close(STDIN_FILENO);
-	close(STDOUT_FILENO);
-	close(STDERR_FILENO);
-
-	signal(SIGHUP, SIG_IGN);	/* so vhangup() won't kill us */
-	vhangup();
-	signal(SIGHUP, SIG_DFL);
+	//tcsetattr(0, TCSANOW, &ttt);
 
 	/* open stdin,stdout,stderr to the tty */
-//	open_tty(cxt->tty_path);
+        //	open_tty(cxt->tty_path);
 
 	/* restore tty modes */
 	tcsetattr(0, TCSAFLUSH, &tt);
 }
 
-
-/*
- * Logs failed login attempts in _PATH_BTMP, if it exists.
- * Must be called only with username the name of an actual user.
- * The most common login failure is to give password instead of username.
- */
-static void log_btmp(struct login_context *cxt)
-{
-	struct utmpx ut;
-	struct timeval tv;
-
-	memset(&ut, 0, sizeof(ut));
-
-	strncpy(ut.ut_user,
-		cxt->username ? cxt->username : "(unknown)",
-		sizeof(ut.ut_user));
-
-	if (cxt->tty_number)
-		strncpy(ut.ut_id, cxt->tty_number, sizeof(ut.ut_id));
-	if (cxt->tty_name)
-		xstrncpy(ut.ut_line, cxt->tty_name, sizeof(ut.ut_line));
-
-	gettimeofday(&tv, NULL);
-	ut.ut_tv.tv_sec = tv.tv_sec;
-	ut.ut_tv.tv_usec = tv.tv_usec;
-
-	ut.ut_type = LOGIN_PROCESS;	/* XXX doesn't matter */
-	ut.ut_pid = cxt->pid;
-
-	if (cxt->hostname) {
-		xstrncpy(ut.ut_host, cxt->hostname, sizeof(ut.ut_host));
-		if (*cxt->hostaddress)
-			memcpy(&ut.ut_addr_v6, cxt->hostaddress,
-			       sizeof(ut.ut_addr_v6));
-	}
-
-	updwtmpx(_PATH_BTMP, &ut);
-}
-
-
-#ifdef HAVE_LIBAUDIT
-static void log_audit(struct login_context *cxt, int status)
-{
-	int audit_fd;
-	struct passwd *pwd = cxt->pwd;
-
-	audit_fd = audit_open();
-	if (audit_fd == -1)
-		return;
-	if (!pwd && cxt->username)
-		pwd = getpwnam(cxt->username);
-
-	audit_log_acct_message(audit_fd,
-			       AUDIT_USER_LOGIN,
-			       NULL,
-			       "login",
-			       cxt->username ? cxt->username : "(unknown)",
-			       pwd ? pwd->pw_uid : (unsigned int) -1,
-			       cxt->hostname,
-			       NULL,
-			       cxt->tty_name,
-			       status);
-
-	close(audit_fd);
-}
-#else				/* !HAVE_LIBAUDIT */
-# define log_audit(cxt, status)
-#endif				/* HAVE_LIBAUDIT */
-
-static void log_lastlog(struct login_context *cxt)
+static void log_lastlog(struct nlogin_context *cxt)
 {
 	struct sigaction sa, oldsa_xfsz;
 	struct lastlog ll;
@@ -966,26 +623,6 @@ static void log_lastlog(struct login_context *cxt)
 	if (lseek(fd, (off_t) cxt->pwd->pw_uid * sizeof(ll), SEEK_SET) == -1)
 		goto done;
 
-	/*
-	 * Print last log message.
-	 */
-	if (!cxt->quiet) {
-		if (read(fd, (char *)&ll, sizeof(ll)) == sizeof(ll) &&
-							ll.ll_time != 0) {
-			time_t ll_time = (time_t) ll.ll_time;
-
-			printf(_("Last login: %.*s "), 24 - 5, ctime(&ll_time));
-			if (*ll.ll_host != '\0')
-				printf(_("from %.*s\n"),
-				       (int)sizeof(ll.ll_host), ll.ll_host);
-			else
-				printf(_("on %.*s\n"),
-				       (int)sizeof(ll.ll_line), ll.ll_line);
-		}
-		if (lseek(fd, (off_t) cxt->pwd->pw_uid * sizeof(ll), SEEK_SET) == -1)
-			goto done;
-	}
-
 	memset((char *)&ll, 0, sizeof(ll));
 
 	time(&t);
@@ -993,8 +630,6 @@ static void log_lastlog(struct login_context *cxt)
 
 	if (cxt->tty_name)
 		xstrncpy(ll.ll_line, cxt->tty_name, sizeof(ll.ll_line));
-	if (cxt->hostname)
-		xstrncpy(ll.ll_host, cxt->hostname, sizeof(ll.ll_host));
 
 	if (write_all(fd, (char *)&ll, sizeof(ll)))
 		warn(_("write lastlog failed"));
@@ -1005,82 +640,7 @@ done:
 	sigaction(SIGXFSZ, &oldsa_xfsz, NULL);		/* restore original setting */
 }
 
-/*
- * Update wtmp and utmp logs.
- */
-static void log_utmp(struct login_context *cxt)
-{
-	struct utmpx ut;
-	struct utmpx *utp;
-	struct timeval tv;
-
-	utmpxname(_PATH_UTMP);
-	setutxent();
-
-	/* Find pid in utmp.
-	 *
-	 * login sometimes overwrites the runlevel entry in /var/run/utmp,
-	 * confusing sysvinit. I added a test for the entry type, and the
-	 * problem was gone. (In a runlevel entry, st_pid is not really a pid
-	 * but some number calculated from the previous and current runlevel.)
-	 * -- Michael Riepe <michael@stud.uni-hannover.de>
-	 */
-	while ((utp = getutxent()))
-		if (utp->ut_pid == cxt->pid
-		    && utp->ut_type >= INIT_PROCESS
-		    && utp->ut_type <= DEAD_PROCESS)
-			break;
-
-	/* If we can't find a pre-existing entry by pid, try by line.
-	 * BSD network daemons may rely on this. */
-	if (utp == NULL && cxt->tty_name) {
-		setutxent();
-		ut.ut_type = LOGIN_PROCESS;
-		strncpy(ut.ut_line, cxt->tty_name, sizeof(ut.ut_line));
-		utp = getutxline(&ut);
-	}
-
-	/* If we can't find a pre-existing entry by pid and line, try it by id.
-	 * Very stupid telnetd daemons don't set up utmp at all. (kzak) */
-	if (utp == NULL && cxt->tty_number) {
-	     setutxent();
-	     ut.ut_type = DEAD_PROCESS;
-	     strncpy(ut.ut_id, cxt->tty_number, sizeof(ut.ut_id));
-	     utp = getutxid(&ut);
-	}
-
-	if (utp)
-		memcpy(&ut, utp, sizeof(ut));
-	else
-		/* some gettys/telnetds don't initialize utmp... */
-		memset(&ut, 0, sizeof(ut));
-
-	if (cxt->tty_number && ut.ut_id[0] == 0)
-		strncpy(ut.ut_id, cxt->tty_number, sizeof(ut.ut_id));
-	if (cxt->username)
-		strncpy(ut.ut_user, cxt->username, sizeof(ut.ut_user));
-	if (cxt->tty_name)
-		xstrncpy(ut.ut_line, cxt->tty_name, sizeof(ut.ut_line));
-
-	gettimeofday(&tv, NULL);
-	ut.ut_tv.tv_sec = tv.tv_sec;
-	ut.ut_tv.tv_usec = tv.tv_usec;
-	ut.ut_type = USER_PROCESS;
-	ut.ut_pid = cxt->pid;
-	if (cxt->hostname) {
-		xstrncpy(ut.ut_host, cxt->hostname, sizeof(ut.ut_host));
-		if (*cxt->hostaddress)
-			memcpy(&ut.ut_addr_v6, cxt->hostaddress,
-			       sizeof(ut.ut_addr_v6));
-	}
-
-	pututxline(&ut);
-	endutxent();
-
-	updwtmpx(_PATH_WTMP, &ut);
-}
-
-static void log_syslog(struct login_context *cxt)
+static void log_syslog(struct nlogin_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
 
@@ -1088,255 +648,14 @@ static void log_syslog(struct login_context *cxt)
 		return;
 
 	if (!strncmp(cxt->tty_name, "ttyS", 4))
-		syslog(LOG_INFO, _("DIALUP AT %s BY %s"),
-		       cxt->tty_name, pwd->pw_name);
+		syslog(LOG_INFO, _("Unsupported DIALUP AT %s BY %s"),
+			   cxt->tty_name, pwd->pw_name);
 
 	if (!pwd->pw_uid) {
-		if (cxt->hostname)
-			syslog(LOG_NOTICE, _("ROOT LOGIN ON %s FROM %s"),
-			       cxt->tty_name, cxt->hostname);
-		else
-			syslog(LOG_NOTICE, _("ROOT LOGIN ON %s"), cxt->tty_name);
+		syslog(LOG_NOTICE, _("ROOT LOGIN ON %s"), cxt->tty_name);
 	} else {
-		if (cxt->hostname)
-			syslog(LOG_INFO, _("LOGIN ON %s BY %s FROM %s"),
-			       cxt->tty_name, pwd->pw_name, cxt->hostname);
-		else
-			syslog(LOG_INFO, _("LOGIN ON %s BY %s"), cxt->tty_name,
-			       pwd->pw_name);
-	}
-}
-
-/* encapsulate stupid "void **" pam_get_item() API */
-static int loginpam_get_username(pam_handle_t *pamh, char **name)
-{
-	const void *item = (void *)*name;
-	int rc;
-	rc = pam_get_item(pamh, PAM_USER, &item);
-	*name = (char *)item;
-	return rc;
-}
-
-static void loginpam_err(pam_handle_t *pamh, int retcode)
-{
-	const char *msg = pam_strerror(pamh, retcode);
-
-	if (msg) {
-		fprintf(stderr, "\n%s\n", msg);
-		syslog(LOG_ERR, "%s", msg);
-	}
-	pam_end(pamh, retcode);
-	sleepexit(EXIT_FAILURE);
-}
-
-/*
- * Composes "<host> login: " string; or returns "login: " if -H is given or
- * LOGIN_PLAIN_PROMPT=yes configured.
- */
-static const char *loginpam_get_prompt(struct login_context *cxt)
-{
-	const char *host;
-	char *prompt, *dflt_prompt = _("login: ");
-	size_t sz;
-
-	if (!(host = get_thishost(cxt, NULL)))
-		return dflt_prompt;
-
-	sz = strlen(host) + 1 + strlen(dflt_prompt) + 1;
-	prompt = xmalloc(sz);
-	snprintf(prompt, sz, "%s %s", host, dflt_prompt);
-
-	return prompt;
-}
-
-static pam_handle_t *init_loginpam(struct login_context *cxt)
-{
-	pam_handle_t *pamh = NULL;
-	int rc;
-
-	/*
-	 * username is initialized to NULL and if specified on the command line
-	 * it is set.  Therefore, we are safe not setting it to anything.
-	 */
-	rc = pam_start("login",
-		       cxt->username, &cxt->conv, &pamh);
-	if (rc != PAM_SUCCESS) {
-		warnx(_("PAM failure, aborting: %s"), pam_strerror(pamh, rc));
-		syslog(LOG_ERR, _("Couldn't initialize PAM: %s"),
-		       pam_strerror(pamh, rc));
-		sleepexit(EXIT_FAILURE);
-	}
-
-	/* hostname & tty are either set to NULL or their correct values,
-	 * depending on how much we know. */
-	rc = pam_set_item(pamh, PAM_RHOST, cxt->hostname);
-	if (is_pam_failure(rc))
-		loginpam_err(pamh, rc);
-
-	rc = pam_set_item(pamh, PAM_TTY, cxt->tty_name);
-	if (is_pam_failure(rc))
-		loginpam_err(pamh, rc);
-
-	/*
-	 * Andrew.Taylor@cal.montage.ca: Provide a user prompt to PAM so that
-	 * the "login: " prompt gets localized. Unfortunately, PAM doesn't have
-	 * an interface to specify the "Password: " string (yet).
-	 */
-	rc = pam_set_item(pamh, PAM_USER_PROMPT, loginpam_get_prompt(cxt));
-	if (is_pam_failure(rc))
-		loginpam_err(pamh, rc);
-
-	/* We don't need the original username. We have to follow PAM. */
-	free(cxt->username);
-	cxt->username = NULL;
-	cxt->pamh = pamh;
-
-	return pamh;
-}
-
-static void loginpam_auth(struct login_context *cxt)
-{
-	int rc;
-    const char *retrystr;
-	unsigned int retries, failcount = 0;
-	const char *hostname = cxt->hostname ? cxt->hostname :
-			       cxt->tty_name ? cxt->tty_name : "<unknown>";
-	pam_handle_t *pamh = cxt->pamh;
-
-	/* if we didn't get a user on the command line, set it to NULL */
-	loginpam_get_username(pamh, &cxt->username);
-
-	retrystr = getenv("LOGIN_RETRIES");
-    retries  = atoi(retrystr);
-
-	/*
-	 * There may be better ways to deal with some of these conditions, but
-	 * at least this way I don't think we'll be giving away information...
-	 *
-	 * Perhaps someday we can trust that all PAM modules will pay attention
-	 * to failure count and get rid of LOGIN_MAX_TRIES?
-	 */
-	rc = pam_authenticate(pamh, 0);
-
-	while ((++failcount < retries) &&
-	       ((rc == PAM_AUTH_ERR) ||
-		(rc == PAM_USER_UNKNOWN) ||
-		(rc == PAM_CRED_INSUFFICIENT) ||
-		(rc == PAM_AUTHINFO_UNAVAIL))) {
-
-		/*if (rc == PAM_USER_UNKNOWN)
-			cxt->username = NULL;
-		else*/
-			loginpam_get_username(pamh, &cxt->username);
-
-		syslog(LOG_NOTICE,
-		       _("FAILED LOGIN %u FROM %s FOR %s, %s"),
-		       failcount, hostname,
-		       cxt->username ? cxt->username : "(unknown)",
-		       pam_strerror(pamh, rc));
-
-		log_btmp(cxt);
-		log_audit(cxt, 0);
-
-		fprintf(stderr, _("Login incorrect\n\n"));
-
-		pam_set_item(pamh, PAM_USER, NULL);
-		rc = pam_authenticate(pamh, 0);
-	}
-
-	if (is_pam_failure(rc)) {
-
-		/*if (rc == PAM_USER_UNKNOWN)
-			cxt->username = NULL;
-		else*/
-			loginpam_get_username(pamh, &cxt->username);
-
-		if (rc == PAM_MAXTRIES)
-			syslog(LOG_NOTICE,
-			       _("TOO MANY LOGIN TRIES (%u) FROM %s FOR %s, %s"),
-			       failcount, hostname,
-			       cxt->username ? cxt->username : "(unknown)",
-			       pam_strerror(pamh, rc));
-		else
-			syslog(LOG_NOTICE,
-			       _("FAILED LOGIN SESSION FROM %s FOR %s, %s"),
-			       hostname,
-			       cxt->username ? cxt->username : "(unknown)",
-			       pam_strerror(pamh, rc));
-
-		log_btmp(cxt);
-		log_audit(cxt, 0);
-
-		fprintf(stderr, _("\nLogin incorrect\n"));
-		pam_end(pamh, rc);
-		sleepexit(EXIT_SUCCESS);
-	}
-}
-
-static void loginpam_acct(struct login_context *cxt)
-{
-	int rc;
-	pam_handle_t *pamh = cxt->pamh;
-
-	rc = pam_acct_mgmt(pamh, 0);
-
-	if (rc == PAM_NEW_AUTHTOK_REQD)
-		rc = pam_chauthtok(pamh, PAM_CHANGE_EXPIRED_AUTHTOK);
-
-	if (is_pam_failure(rc))
-		loginpam_err(pamh, rc);
-
-	/*
-	 * Grab the user information out of the password file for future use.
-	 * First get the username that we are actually using, though.
-	 */
-	rc = loginpam_get_username(pamh, &cxt->username);
-	if (is_pam_failure(rc))
-		loginpam_err(pamh, rc);
-
-	if (!cxt->username || !*cxt->username) {
-		warnx(_("\nSession setup problem, abort."));
-		syslog(LOG_ERR, _("NULL user name in %s:%d. Abort."),
-		       __FUNCTION__, __LINE__);
-		pam_end(pamh, PAM_SYSTEM_ERR);
-		sleepexit(EXIT_FAILURE);
-	}
-}
-
-/*
- * Note that the position of the pam_setcred() call is discussable:
- *
- *  - the PAM docs recommend pam_setcred() before pam_open_session()
- *  - but the original RFC http://www.opengroup.org/rfc/mirror-rfc/rfc86.0.txt
- *    uses pam_setcred() after pam_open_session()
- *
- * The old login versions (before year 2011) followed the RFC. This is probably
- * not optimal, because there could be a dependence between some session modules
- * and the user's credentials.
- *
- * The best is probably to follow openssh and call pam_setcred() before and
- * after pam_open_session().                -- kzak@redhat.com (18-Nov-2011)
- *
- */
-static void loginpam_session(struct login_context *cxt)
-{
-	int rc;
-	pam_handle_t *pamh = cxt->pamh;
-
-	rc = pam_setcred(pamh, PAM_ESTABLISH_CRED);
-	if (is_pam_failure(rc))
-		loginpam_err(pamh, rc);
-
-	rc = pam_open_session(pamh, 0);
-	if (is_pam_failure(rc)) {
-		pam_setcred(cxt->pamh, PAM_DELETE_CRED);
-		loginpam_err(pamh, rc);
-	}
-
-	rc = pam_setcred(pamh, PAM_REINITIALIZE_CRED);
-	if (is_pam_failure(rc)) {
-		pam_close_session(pamh, 0);
-		loginpam_err(pamh, rc);
+		syslog(LOG_NOTICE, _("NON-ROOT LOGIN ON %s using BANGETTY!!"),
+			   cxt->tty_name);
 	}
 }
 
@@ -1344,11 +663,10 @@ static void loginpam_session(struct login_context *cxt)
  * Detach the controlling terminal, fork, restore syslog stuff, and create
  * a new session.
  */
-static void fork_session(struct login_context *cxt)
+static void fork_session(void)
 {
 	struct sigaction sa, oldsa_hup, oldsa_term;
 
-	signal(SIGALRM, SIG_DFL);
 	signal(SIGQUIT, SIG_DFL);
 	signal(SIGTSTP, SIG_IGN);
 
@@ -1365,14 +683,6 @@ static void fork_session(struct login_context *cxt)
 	 */
 	ioctl(0, TIOCNOTTY, NULL);
 
-	/*
-	 * We have to beware of SIGTERM, because leaving a PAM session
-	 * without pam_close_session() is a pretty bad thing.
-	 */
-	sa.sa_handler = sig_handler;
-	sigaction(SIGHUP, &sa, NULL);
-	sigaction(SIGTERM, &sa, &oldsa_term);
-
 	closelog();
 
 	/*
@@ -1383,8 +693,6 @@ static void fork_session(struct login_context *cxt)
 	if (child_pid < 0) {
 		warn(_("fork failed"));
 
-		pam_setcred(cxt->pamh, PAM_DELETE_CRED);
-		pam_end(cxt->pamh, pam_close_session(cxt->pamh, 0));
 		sleepexit(EXIT_FAILURE);
 	}
 
@@ -1403,10 +711,7 @@ static void fork_session(struct login_context *cxt)
 
 		/* wait as long as any child is there */
 		while (wait(NULL) == -1 && errno == EINTR) ;
-		openlog("login", LOG_ODELAY, LOG_AUTHPRIV);
-
-		pam_setcred(cxt->pamh, PAM_DELETE_CRED);
-		pam_end(cxt->pamh, pam_close_session(cxt->pamh, 0));
+		openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
 		exit(EXIT_SUCCESS);
 	}
 
@@ -1429,7 +734,7 @@ static void fork_session(struct login_context *cxt)
 
 	/* make sure we have a controlling tty */
 	//open_tty(cxt->tty_path);
-	openlog("login", LOG_ODELAY, LOG_AUTHPRIV);	/* reopen */
+	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);	/* reopen */
 
 	/*
 	 * TIOCSCTTY: steal tty from other process group.
@@ -1442,12 +747,10 @@ static void fork_session(struct login_context *cxt)
 /*
  * Initialize $TERM, $HOME, ...
  */
-static void init_environ(struct login_context *cxt)
+static void init_environ(struct nlogin_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
-	char *termenv, **env;
-	char tmp[PATH_MAX];
-	int len, i;
+	char *termenv;
 
 	termenv = getenv("TERM");
 	if (termenv)
@@ -1467,139 +770,73 @@ static void init_environ(struct login_context *cxt)
 			err(EXIT_FAILURE, _("failed to set the %s environment variable"), "PATH");
 
 	} else if (setenv("PATH", "", 1) != 0 &&
-		       setenv("PATH", _PATH_DEFPATH_ROOT, 1) != 0) {
+			   setenv("PATH", _PATH_DEFPATH_ROOT, 1) != 0) {
 			err(EXIT_FAILURE, _("failed to set the %s environment variable"), "PATH");
 	}
-
-	/* mailx will give a funny error msg if you forget this one */
-	len = snprintf(tmp, sizeof(tmp), "%s/%s", _PATH_MAILDIR, pwd->pw_name);
-	if (len > 0 && (size_t) len < sizeof(tmp))
-		xsetenv("MAIL", tmp, 0);
 
 	/* LOGNAME is not documented in login(1) but HP-UX 6.5 does it. We'll
 	 * not allow modifying it.
 	 */
 	xsetenv("LOGNAME", pwd->pw_name, 1);
-
-	env = pam_getenvlist(cxt->pamh);
-	for (i = 0; env && env[i]; i++)
-		putenv(env[i]);
 }
 
 
 void login_now(int argc, char **argv)
 {
-	int cnt;
 	char *childArgv[10];
 	char *buff;
 	int childArgc = 0;
-	int retcode;
-	struct sigaction act;
 	struct passwd *pwd;
 
-	struct login_context cxt = {
+	struct nlogin_context cxt = {
 		.tty_mode = TTY_MODE,		  /* tty chmod() */
 		.pid = getpid(),		  /* PID */
-#ifdef HAVE_SECURITY_PAM_MISC_H
-		.conv = { misc_conv, NULL }	  /* Linux-PAM conversation function */
-#elif defined(HAVE_SECURITY_OPENPAM_H)
-		.conv = { openpam_ttyconv, NULL } /* OpenPAM conversation function */
-#endif
-
 	};
 
-	setlocale(LC_ALL, "");
-	bindtextdomain(PACKAGE, LOCALEDIR);
-	textdomain(PACKAGE);
-
-	signal(SIGALRM, timedout);
-	(void) sigaction(SIGALRM, NULL, &act);
-	act.sa_flags &= ~SA_RESTART;
-	sigaction(SIGALRM, &act, NULL);
+	debug("inside login_now");
 	signal(SIGQUIT, SIG_IGN);
 	signal(SIGINT, SIG_IGN);
 
 	setpriority(PRIO_PROCESS, 0, 0);
-	initproctitle(argc, argv);
+	//initproctitle(argc, argv);
 
-	if (*argv) {
-		char *p = *argv;
-		cxt.username = xstrdup(p);
+	debug("setting username to root");
+	cxt.username = xmalloc(10); /* XXX free, or better way to set it */
+	memset(cxt.username, 0, 10);
+	strcpy(cxt.username, "root");
+	debug("set username to root");
 
-		/* Wipe the name - some people mistype their password here. */
-		/* (Of course we are too late, but perhaps this helps a little...) */
-		while (*p)
-			*p++ = ' ';
-	}
-
-	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--)
+#if 0
+	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
 		close(cnt);
+#endif
+	debug("before setpgrp");
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
+	debug("after setpgrp\n");
 	init_tty(&cxt);
 
-	openlog("login", LOG_ODELAY, LOG_AUTHPRIV);
+	debug("about to open logs\n");
+	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
+	debug("logs opened\n");
 
-	init_loginpam(&cxt);
-
-	/* the user has already been authenticated */
-	cxt.noauth = getuid() == 0 ? 1 : 0;
-
-	if (!cxt.noauth)
-		loginpam_auth(&cxt);
-
-	/*
-	 * Authentication may be skipped (for example, during krlogin, rlogin,
-	 * etc...), but it doesn't mean that we can skip other account checks.
-	 * The account could be disabled or the password has expired (although
-	 * the kerberos ticket is valid).      -- kzak@redhat.com (22-Feb-2006)
-	 */
-	loginpam_acct(&cxt);
-
+	debug("before xgetpwnam\n");
 	cxt.pwd = xgetpwnam(cxt.username, &cxt.pwdbuf);
 	if (!cxt.pwd) {
 		warnx(_("\nSession setup problem, abort."));
 		syslog(LOG_ERR, _("Invalid user name \"%s\" in %s:%d. Abort."),
-		       cxt.username, __FUNCTION__, __LINE__);
-		pam_end(cxt.pamh, PAM_SYSTEM_ERR);
+			   cxt.username, __FUNCTION__, __LINE__);
 		sleepexit(EXIT_FAILURE);
 	}
 
 	pwd = cxt.pwd;
-	cxt.username = pwd->pw_name;
+	//cxt.username = pwd->pw_name;
+	debug("set username cxt.username\n");
 
-	/*
-	 * Initialize the supplementary group list. This should be done before
-	 * pam_setcred, because PAM modules might add groups during that call.
-	 *
-	 * For root we don't call initgroups, instead we call setgroups with
-	 * group 0. This avoids the need to step through the whole group file,
-	 * which can cause problems if NIS, NIS+, LDAP or something similar
-	 * is used and the machine has network problems.
-	 */
-	retcode = pwd->pw_uid ? initgroups(cxt.username, pwd->pw_gid) :	/* user */
-			        setgroups(0, NULL);			/* root */
-	if (retcode < 0) {
-		syslog(LOG_ERR, _("groups initialization failed: %m"));
-		warnx(_("\nSession setup problem, abort."));
-		pam_end(cxt.pamh, PAM_SYSTEM_ERR);
-		sleepexit(EXIT_FAILURE);
-	}
-
-	/*
-	 * Open PAM session (after successful authentication and account check).
-	 */
-	loginpam_session(&cxt);
-
-	/* committed to login -- turn off timeout */
-	alarm((unsigned int)0);
+	setgroups(0, NULL);/* root */
 
 	endpwent();
 
-	cxt.quiet = 0;//get_hushlogin_status(pwd, 1);
-
-	log_utmp(&cxt);
-	log_audit(&cxt, 1);
 	log_lastlog(&cxt);
 
 	chown_tty(&cxt);
@@ -1614,40 +851,18 @@ void login_now(int argc, char **argv)
 
 	init_environ(&cxt);		/* init $HOME, $TERM ... */
 
-	setproctitle("login", cxt.username);
+	//setproctitle(PRG_NAME, cxt.username);
 
 	log_syslog(&cxt);
 
-	if (!cxt.quiet) {
-		motd();
-//yes
-#ifdef LOGIN_STAT_MAIL
-		/*
-		 * This turns out to be a bad idea: when the mail spool
-		 * is NFS mounted, and the NFS connection hangs, the
-		 * login hangs, even root cannot login.
-		 * Checking for mail should be done from the shell.
-		 */
-		{
-			struct stat st;
-			char *mail;
-
-			mail = getenv("MAIL");
-			if (mail && stat(mail, &st) == 0 && st.st_size != 0) {
-				if (st.st_mtime > st.st_atime)
-					printf(_("You have new mail.\n"));
-				else
-					printf(_("You have mail.\n"));
-			}
-		}
-#endif
-	}
+	motd();
 
 	/*
 	 * Detach the controlling terminal, fork, and create a new session
 	 * and reinitialize syslog stuff.
 	 */
-	fork_session(&cxt);
+	fork_session();
+	debug("fork done\n");
 
 	/* discard permissions last so we can't get killed and drop core */
 	if (setuid(pwd->pw_uid) < 0 && pwd->pw_uid) {
@@ -1655,45 +870,33 @@ void login_now(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	/* wait until here to change directory! */
 	if (chdir(pwd->pw_dir) < 0) {
 		warn(_("%s: change directory failed"), pwd->pw_dir);
 
 		if (chdir("/"))
-			exit(EXIT_FAILURE);
+			warn(_("%s: change directory failed"), "/");
 		pwd->pw_dir = "/";
 		printf(_("Logging in with home = \"/\".\n"));
 	}
 
-	/* if the shell field has a space: treat it like a shell script */
-	if (strchr(pwd->pw_shell, ' ')) {
-		buff = xmalloc(strlen(pwd->pw_shell) + 6);
+        childArgc              = 0;
+	childArgv[childArgc++] = "/bin/bash";
+	childArgv[childArgc++] = "-sh";
+	if ( argc > 1) {
+		debug("handling argc\n");
+                printf("%d arguments are {%s}-{%s}\n", argc, argv[0], argv[1]);
+		buff = xmalloc(strlen(argv[1]) + 6);
 
 		strcpy(buff, "exec ");
-		strcat(buff, pwd->pw_shell);
-		childArgv[childArgc++] = "/bin/sh";
-		childArgv[childArgc++] = "-sh";
+		strcat(buff, argv[1]);
 		childArgv[childArgc++] = "-c";
 		childArgv[childArgc++] = buff;
-	} else {
-		char tbuf[PATH_MAX + 2], *p;
-
-		tbuf[0] = '-';
-		xstrncpy(tbuf + 1, ((p = strrchr(pwd->pw_shell, '/')) ?
-				    p + 1 : pwd->pw_shell), sizeof(tbuf) - 1);
-
-		childArgv[childArgc++] = pwd->pw_shell;
-		childArgv[childArgc++] = xstrdup(tbuf);
 	}
-
-	childArgv[childArgc++] = NULL;
+    childArgv[childArgc++] = NULL;
 
 	execvp(childArgv[0], childArgv + 1);
 
-	if (!strcmp(childArgv[0], "/bin/sh"))
-		warn(_("couldn't exec shell script"));
-	else
-		warn(_("no shell"));
+	warn(_("no shell"));
 
 	exit(EXIT_SUCCESS);
 }
@@ -1718,60 +921,29 @@ static void output_version(void)
 	fputs(")\n", stdout);
 }
 
-#define is_speed(str) (strlen((str)) == strspn((str), "0123456789,"))
-
 /* Parse command-line arguments. */
-static void parse_args(int argc, char **argv, struct options *op)
+static void parse_args(int argc, char **argv, struct nlogin_context *op)
 {
 	int c;
 
 	enum {
 		VERSION_OPTION = CHAR_MAX + 1,
 		HELP_OPTION,
-		RELOAD_OPTION,
 	};
 	const struct option longopts[] = {
-		{  "init-string",    required_argument,  NULL,  'I'  },
-		{  "reload",         no_argument,        NULL,  RELOAD_OPTION },
-		{  "version",	     no_argument,	     NULL,  VERSION_OPTION  },
-		{  "help",	         no_argument,	     NULL,  HELP_OPTION     },
+		{  "version",	     no_argument,	     NULL,  'v'  },
+		{  "help",	         no_argument,	     NULL,  'h'  },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	while ((c = getopt_long(argc, argv,
-			   "8a:cC:d:Ef:hH:iI:Jl:L::mnNo:pP:r:Rst:Uw", longopts,
-			    NULL)) != -1) {
+			   "hv", longopts,
+				NULL)) != -1) {
 		switch (c) {
-		case 'L':
-			/* -L and -L=always have the same meaning */
-			op->clocal = CLOCAL_MODE_ALWAYS;
-			if (optarg) {
-				if (strcmp(optarg, "=always") == 0)
-					op->clocal = CLOCAL_MODE_ALWAYS;
-				else if (strcmp(optarg, "=never") == 0)
-					op->clocal = CLOCAL_MODE_NEVER;
-				else if (strcmp(optarg, "=auto") == 0)
-					op->clocal = CLOCAL_MODE_AUTO;
-				else
-					log_err(_("invalid argument of --local-line"));
-			}
-			break;
-		case 'P':
-			op->nice = strtos32_or_err(optarg,  _("invalid nice argument"));
-			break;
-		case 't':
-			op->timeout = strtou32_or_err(optarg,  _("invalid timeout argument"));
-			break;
-		case 'U':
-			op->flags |= F_LCUC;
-			break;
-		case RELOAD_OPTION:
-			reload_agettys();
-			exit(EXIT_SUCCESS);
-		case VERSION_OPTION:
+		case 'v':
 			output_version();
 			exit(EXIT_SUCCESS);
-		case HELP_OPTION:
+		case 'h':
 			usage();
 		default:
 			errtryhelp(EXIT_FAILURE);
@@ -1780,37 +952,17 @@ static void parse_args(int argc, char **argv, struct options *op)
 
 	debug("after getopt loop\n");
 
-#if 0
-	if (argc < optind + 1) {
-		log_warn(_("not enough arguments"));
-		errx(EXIT_FAILURE, _("not enough arguments"));
-	}
-#endif
-
-	/* On virtual console remember the line which is used for */
-	if (strncmp(op->tty, "tty", 3) == 0 &&
-	    strspn(op->tty + 3, "0123456789") == strlen(op->tty+3))
-		op->vcline = op->tty+3;
-
-#if 0
-	if (argc > optind && argv[optind])
-		op->term = argv[optind];
-#endif
-        op->term = 0; /* XXX hardcoded to 0 for now, Vijo */
 
 	debug("exiting parseargs\n");
 }
 
-#ifdef	SYSV_STYLE
-
 /* Update our utmp entry. */
-static void update_utmp(struct options *op)
+static void update_utmp(struct nlogin_context *op)
 {
 	struct utmpx ut;
 	time_t t;
 	pid_t pid = getpid();
 	pid_t sid = getsid(0);
-	char *vcline = op->vcline;
 	char *line   = op->tty;
 	struct utmpx *utp;
 
@@ -1825,15 +977,6 @@ static void update_utmp(struct options *op)
 	utmpxname(_PATH_UTMP);
 	setutxent();
 
-	/*
-	 * Find my pid in utmp.
-	 *
-	 * FIXME: Earlier (when was that?) code here tested only utp->ut_type !=
-	 * INIT_PROCESS, so maybe the >= here should be >.
-	 *
-	 * FIXME: The present code is taken from login.c, so if this is changed,
-	 * maybe login has to be changed as well (is this true?).
-	 */
 	while ((utp = getutxent()))
 		if (utp->ut_pid == pid
 				&& utp->ut_type >= INIT_PROCESS
@@ -1843,23 +986,19 @@ static void update_utmp(struct options *op)
 	if (utp) {
 		memcpy(&ut, utp, sizeof(ut));
 	} else {
+		char * ptr;
+
 		/* Some inits do not initialize utmp. */
 		memset(&ut, 0, sizeof(ut));
-		if (vcline && *vcline)
-			/* Standard virtual console devices */
-			strncpy(ut.ut_id, vcline, sizeof(ut.ut_id));
-		else {
-			size_t len = strlen(line);
-			char * ptr;
-			if (len >= sizeof(ut.ut_id))
-				ptr = line + len - sizeof(ut.ut_id);
-			else
-				ptr = line;
-			strncpy(ut.ut_id, ptr, sizeof(ut.ut_id));
-		}
+		size_t len = strlen(line);
+		if (len >= sizeof(ut.ut_id))
+			ptr = line + len - sizeof(ut.ut_id);
+		else
+			ptr = line;
+		strncpy(ut.ut_id, ptr, sizeof(ut.ut_id));
 	}
 
-	strncpy(ut.ut_user, "LOGIN", sizeof(ut.ut_user));
+	strncpy(ut.ut_user, PRG_NAME, sizeof(ut.ut_user));
 	strncpy(ut.ut_line, line, sizeof(ut.ut_line));
 	time(&t);
 	ut.ut_tv.tv_sec = t;
@@ -1873,108 +1012,72 @@ static void update_utmp(struct options *op)
 	updwtmpx(_PATH_WTMP, &ut);
 }
 
-#endif				/* SYSV_STYLE */
-
 /* Set up tty as stdin, stdout & stderr. */
-static void open_tty(char *tty, struct termios *tp, struct options *op)
+static void open_tty(char *tty, struct termios *tp, struct nlogin_context *op)
 {
 	const pid_t pid = getpid();
 	int closed = 0;
-#ifndef KDGKBMODE
-	int serial;
-#endif
+        int serial;
+        int fd;
+	pid_t tid;
+	gid_t gid = 0;
+	struct stat st;
 
 	/* Set up new standard input, unless we are given an already opened port. */
+ 
+	/* Open the tty as standard input. */
+	if ((fd = open(tty, O_RDWR|O_NOCTTY|O_NONBLOCK, 0)) < 0)
+		log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
 
-	if (strcmp(tty, "-") != 0) {
-		char buf[PATH_MAX+1];
-		struct group *gr = NULL;
-		struct stat st;
-		int fd, len;
-		pid_t tid;
-		gid_t gid = 0;
-
-		/* Use tty group if available */
-		if ((gr = getgrnam("tty")))
-			gid = gr->gr_gid;
-
-		len = snprintf(buf, sizeof(buf), "/dev/%s", tty);
-		if (len < 0 || (size_t)len >= sizeof(buf))
-			log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
-
-		/* Open the tty as standard input. */
-		if ((fd = open(buf, O_RDWR|O_NOCTTY|O_NONBLOCK, 0)) < 0)
-			log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
-
-		/*
-		 * There is always a race between this reset and the call to
-		 * vhangup() that s.o. can use to get access to your tty.
-		 * Linux login(1) will change tty permissions. Use root owner and group
-		 * with permission -rw------- for the period between getty and login.
-		 */
-		if (fchown(fd, 0, gid) || fchmod(fd, (gid ? 0620 : 0600))) {
-			if (errno == EROFS)
-				log_warn("%s: %m", buf);
-			else
-				log_err("%s: %m", buf);
-		}
-
-		/* Sanity checks... */
-		if (fstat(fd, &st) < 0)
-			log_err("%s: %m", buf);
-		if ((st.st_mode & S_IFMT) != S_IFCHR)
-			log_err(_("/dev/%s: not a character device"), tty);
-		if (!isatty(fd))
-			log_err(_("/dev/%s: not a tty"), tty);
-
-		if (((tid = tcgetsid(fd)) < 0) || (pid != tid)) {
-			if (ioctl(fd, TIOCSCTTY, 1) == -1)
-				log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
-		}
-
-		close(STDIN_FILENO);
-		errno = 0;
-
-		if (op->flags & F_HANGUP) {
-
-			if (ioctl(fd, TIOCNOTTY))
-				debug("TIOCNOTTY ioctl failed\n");
-
-			/*
-			 * Let's close all file descriptors before vhangup
-			 * https://lkml.org/lkml/2012/6/5/145
-			 */
-			close(fd);
-			close(STDOUT_FILENO);
-			close(STDERR_FILENO);
-			errno = 0;
-			closed = 1;
-
-			if (vhangup())
-				log_err(_("/dev/%s: vhangup() failed: %m"), tty);
-		} else
-			close(fd);
-
-		debug("open(2)\n");
-		if (open(buf, O_RDWR|O_NOCTTY|O_NONBLOCK, 0) != 0)
-			log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
-
-		if (((tid = tcgetsid(STDIN_FILENO)) < 0) || (pid != tid)) {
-			if (ioctl(STDIN_FILENO, TIOCSCTTY, 1) == -1)
-				log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
-		}
-
-	} else {
-
-		/*
-		 * Standard input should already be connected to an open port. Make
-		 * sure it is open for read/write.
-		 */
-
-		if ((fcntl(STDIN_FILENO, F_GETFL, 0) & O_RDWR) != O_RDWR)
-			log_err(_("%s: not open for read/write"), tty);
-
+	/*
+	 * There is always a race between this reset and the call to
+	 * vhangup() that s.o. can use to get access to your tty.
+	 * Linux login(1) will change tty permissions. Use root owner and group
+	 * with permission -rw------- for the period between getty and login.
+	 */
+	if (fchown(fd, 0, gid) || fchmod(fd, (gid ? 0620 : 0600))) {
+		if (errno == EROFS)
+			log_warn("%s: %m", tty);
+		else
+			log_err("%s: %m", tty);
 	}
+
+	/* Sanity checks... */
+	if (fstat(fd, &st) < 0)
+		log_err("%s: %m", tty);
+	if ((st.st_mode & S_IFMT) != S_IFCHR)
+		log_err(_("/dev/%s: not a character device"), tty);
+	if (!isatty(fd))
+		log_err(_("/dev/%s: not a tty"), tty);
+
+	if (((tid = tcgetsid(fd)) < 0) || (pid != tid)) {
+		if (ioctl(fd, TIOCSCTTY, 1) == -1)
+			log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
+	}
+
+	close(STDIN_FILENO);
+	errno = 0;
+
+	close(fd);
+
+	debug("open(2)\n");
+	if (open(tty, O_RDWR|O_NOCTTY|O_NONBLOCK, 0) != 0)
+		log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
+
+	if (((tid = tcgetsid(STDIN_FILENO)) < 0) || (pid != tid)) {
+		if (ioctl(STDIN_FILENO, TIOCSCTTY, 1) == -1)
+			log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
+	}
+
+
+	/*
+	 * Standard input should already be connected to an open port. Make
+	 * sure it is open for read/write.
+	 */
+
+	if ((fcntl(STDIN_FILENO, F_GETFL, 0) & O_RDWR) != O_RDWR)
+		log_err(_("%s: not open for read/write"), tty);
+
 
 	if (tcsetpgrp(STDIN_FILENO, pid))
 		log_warn(_("/dev/%s: cannot set process group: %m"), tty);
@@ -1996,45 +1099,17 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 	/* make stdio unbuffered for slow modem lines */
 	setvbuf(stdout, NULL, _IONBF, 0);
 
-	/*
-	 * The following ioctl will fail if stdin is not a tty, but also when
-	 * there is noise on the modem control lines. In the latter case, the
-	 * common course of action is (1) fix your cables (2) give the modem
-	 * more time to properly reset after hanging up.
-	 *
-	 * SunOS users can achieve (2) by patching the SunOS kernel variable
-	 * "zsadtrlow" to a larger value; 5 seconds seems to be a good value.
-	 * http://www.sunmanagers.org/archives/1993/0574.html
-	 */
 	memset(tp, 0, sizeof(struct termios));
 	if (tcgetattr(STDIN_FILENO, tp) < 0)
 		log_err(_("%s: failed to get terminal attributes: %m"), tty);
 
-
-	/*
-	 * Detect if this is a virtual console or serial/modem line.
-	 * In case of a virtual console the ioctl KDGKBMODE succeeds
-	 * whereas on other lines it will fails.
-	 */
-#ifdef KDGKBMODE
-	if (ioctl(STDIN_FILENO, KDGKBMODE, &op->kbmode) == 0)
-#else
 	if (ioctl(STDIN_FILENO, TIOCMGET, &serial) < 0 && (errno == EINVAL))
-#endif
 	{
 		op->flags |= F_VCONSOLE;
-		if (!op->term)
-			op->term = DEFAULT_VCTERM;
 	} else {
-#ifdef K_RAW
-		op->kbmode = K_RAW;
-#endif
-		if (!op->term)
-			op->term = DEFAULT_STERM;
+		log_err(_("%s: serial is not supported\n"), tty);
 	}
 
-	if (setenv("TERM", op->term, 1) != 0)
-		log_err(_("failed to set the %s environment variable"), "TERM");
 }
 
 /* Initialize termios settings. */
@@ -2053,135 +1128,28 @@ static void termio_clear(int fd)
 }
 
 /* Initialize termios settings. */
-static void termio_init(struct options *op, struct termios *tp)
+static void termio_init(struct nlogin_context *op, struct termios *tp)
 {
-	speed_t ispeed = 0, ospeed = 0; // XXX WRONG!!
-	struct winsize ws;
-#ifdef USE_PLYMOUTH_SUPPORT
-	struct termios lock;
-	int i =  (plymouth_command(MAGIC_PING) == 0) ? PLYMOUTH_TERMIOS_FLAGS_DELAY : 0;
-	if (i)
-		plymouth_command(MAGIC_QUIT);
-	while (i-- > 0) {
-		/*
-		 * Even with TTYReset=no it seems with systemd or plymouth
-		 * the termios flags become changed from under the first
-		 * agetty on a serial system console as the flags are locked.
-		 */
-		memset(&lock, 0, sizeof(struct termios));
-		if (ioctl(STDIN_FILENO, TIOCGLCKTRMIOS, &lock) < 0)
-			break;
-		if (!lock.c_iflag && !lock.c_oflag && !lock.c_cflag && !lock.c_lflag)
-			break;
-		debug("termios locked\n");
-		sleep(1);
-	}
-	memset(&lock, 0, sizeof(struct termios));
-	ioctl(STDIN_FILENO, TIOCSLCKTRMIOS, &lock);
-#endif
-
 	if (op->flags & F_VCONSOLE) {
-#if defined(IUTF8) && defined(KDGKBMODE)
-		switch(op->kbmode) {
-		case K_UNICODE:
-			setlocale(LC_CTYPE, "C.UTF-8");
-			op->flags |= F_UTF8;
-			break;
-		case K_RAW:
-		case K_MEDIUMRAW:
-		case K_XLATE:
-		default:
-			setlocale(LC_CTYPE, "POSIX");
-			op->flags &= ~F_UTF8;
-			break;
-		}
-#else
 		setlocale(LC_CTYPE, "POSIX");
-		op->flags &= ~F_UTF8;
-#endif
+		//op->flags &= ~F_UTF8; VIJO -> FIXME
 		reset_vc(op, tp);
 
-		if ((op->flags & F_NOCLEAR) == 0)
-			termio_clear(STDOUT_FILENO);
+		termio_clear(STDOUT_FILENO);
 		return;
 	}
-
-	/*
-	 * Initial termios settings: 8-bit characters, raw-mode, blocking i/o.
-	 * Special characters are set after we have read the login name; all
-	 * reads will be done in raw mode anyway. Errors will be dealt with
-	 * later on.
-	 */
-
-#ifdef IUTF8
-	tp->c_iflag = tp->c_iflag & IUTF8;
-	if (tp->c_iflag & IUTF8)
-		op->flags |= F_UTF8;
-#else
-	tp->c_iflag = 0;
-#endif
-	tp->c_lflag = 0;
-	tp->c_oflag &= OPOST | ONLCR;
-
-	if ((op->flags & F_KEEPCFLAGS) == 0)
-		tp->c_cflag = CS8 | HUPCL | CREAD | (tp->c_cflag & CLOCAL);
-
-	/*
-	 * Note that the speed is stored in the c_cflag termios field, so we have
-	 * set the speed always when the cflag is reset.
-	 */
-	cfsetispeed(tp, ispeed);
-	cfsetospeed(tp, ospeed);
-
-	/* The default is to follow setting from kernel, but it's possible
-	 * to explicitly remove/add CLOCAL flag by -L[=<mode>]*/
-	switch (op->clocal) {
-	case CLOCAL_MODE_ALWAYS:
-		tp->c_cflag |= CLOCAL;		/* -L or -L=always */
-		break;
-	case CLOCAL_MODE_NEVER:
-		tp->c_cflag &= ~CLOCAL;		/* -L=never */
-		break;
-	case CLOCAL_MODE_AUTO:			/* -L=auto */
-		break;
-	}
-
-#ifdef HAVE_STRUCT_TERMIOS_C_LINE
-	tp->c_line = 0;
-#endif
-	tp->c_cc[VMIN] = 1;
-	tp->c_cc[VTIME] = 0;
-
-	/* Check for terminal size and if not found set default */
-	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0) {
-		if (ws.ws_row == 0)
-			ws.ws_row = 24;
-		if (ws.ws_col == 0)
-			ws.ws_col = 80;
-		if (ioctl(STDIN_FILENO, TIOCSWINSZ, &ws))
-			debug("TIOCSWINSZ ioctl failed\n");
-	}
-
-	 /* Flush input and output queues, important for modems! */
-	tcflush(STDIN_FILENO, TCIOFLUSH);
-
-	if (tcsetattr(STDIN_FILENO, TCSANOW, tp))
-		log_warn(_("setting terminal attributes failed: %m"));
-
-	/* Go to blocking input even in local mode. */
-	fcntl(STDIN_FILENO, F_SETFL,
-	      fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
-
+        /* *ngetty is to be used only on vc */
 	debug("term_io 2\n");
+        log_err("This getty doesn't not support anything other than virtual consoles\n");
 }
 
 /* Reset virtual console on stdin to its defaults */
-static void reset_vc(const struct options *op, struct termios *tp)
+static void reset_vc(const struct nlogin_context *op, struct termios *tp)
 {
 	int fl = 0;
 
+        debug("Resetting Virtual console(VC)..");
 	fl |= (op->flags & F_KEEPCFLAGS) == 0 ? 0 : UL_TTY_KEEPCFLAGS;
-	fl |= (op->flags & F_UTF8)       == 0 ? 0 : UL_TTY_UTF8;
 
 	reset_virtual_console(tp, fl);
 
@@ -2190,421 +1158,9 @@ static void reset_vc(const struct options *op, struct termios *tp)
 
 	/* Go to blocking input even in local mode. */
 	fcntl(STDIN_FILENO, F_SETFL,
-	      fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
+		  fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
+        debug("..completed");
 }
-
-#ifdef AGETTY_RELOAD
-#if 0
-static void open_netlink(void)
-{
-	struct sockaddr_nl addr = { 0, };
-	int sock;
-
-	if (netlink_fd != AGETTY_RELOAD_FDNONE)
-		return;
-
-	sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-	if (sock >= 0) {
-		addr.nl_family = AF_NETLINK;
-		addr.nl_pid = getpid();
-		addr.nl_groups = RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR;
-		if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-			close(sock);
-		else
-			netlink_fd = sock;
-	}
-}
-
-static int process_netlink_msg(int *changed)
-{
-	char buf[4096];
-	struct sockaddr_nl snl;
-	struct nlmsghdr *h;
-	int rc;
-
-	struct iovec iov = {
-		.iov_base = buf,
-		.iov_len = sizeof(buf)
-	};
-	struct msghdr msg = {
-		.msg_name = &snl,
-		.msg_namelen = sizeof(snl),
-		.msg_iov = &iov,
-		.msg_iovlen = 1,
-		.msg_control = NULL,
-		.msg_controllen = 0,
-		.msg_flags = 0
-	};
-
-	rc = recvmsg(netlink_fd, &msg, MSG_DONTWAIT);
-	if (rc < 0) {
-		if (errno == EWOULDBLOCK || errno == EAGAIN)
-			return 0;
-
-		/* Failure, just stop listening for changes */
-		close(netlink_fd);
-		netlink_fd = AGETTY_RELOAD_FDNONE;
-		return 0;
-	}
-
-	for (h = (struct nlmsghdr *)buf; NLMSG_OK(h, (unsigned int)rc); h = NLMSG_NEXT(h, rc)) {
-		if (h->nlmsg_type == NLMSG_DONE ||
-		    h->nlmsg_type == NLMSG_ERROR) {
-			close(netlink_fd);
-			netlink_fd = AGETTY_RELOAD_FDNONE;
-			return 0;
-		}
-
-		*changed = 1;
-		break;
-	}
-
-	return 1;
-}
-
-static int process_netlink(void)
-{
-	int changed = 0;
-	while (process_netlink_msg(&changed));
-	return changed;
-}
-#endif
-
-#if 0
-static int wait_for_term_input(int fd)
-{
-	char buffer[sizeof(struct inotify_event) + NAME_MAX + 1];
-	fd_set rfds;
-
-	if (inotify_fd == AGETTY_RELOAD_FDNONE) {
-		/* make sure the reload trigger file exists */
-		int reload_fd = open(AGETTY_RELOAD_FILENAME,
-					O_CREAT|O_CLOEXEC|O_RDONLY,
-					S_IRUSR|S_IWUSR);
-
-		/* initialize reload trigger inotify stuff */
-		if (reload_fd >= 0) {
-			inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
-			if (inotify_fd > 0)
-				inotify_add_watch(inotify_fd, AGETTY_RELOAD_FILENAME,
-					  IN_ATTRIB | IN_MODIFY);
-
-			close(reload_fd);
-		} else
-			log_warn(_("failed to create reload file: %s: %m"),
-					AGETTY_RELOAD_FILENAME);
-	}
-
-	while (1) {
-		int nfds = fd;
-
-		FD_ZERO(&rfds);
-		FD_SET(fd, &rfds);
-
-		if (inotify_fd >= 0) {
-			FD_SET(inotify_fd, &rfds);
-			nfds = max(nfds, inotify_fd);
-		}
-		if (netlink_fd >= 0) {
-			FD_SET(netlink_fd, &rfds);
-			nfds = max(nfds, netlink_fd);
-		}
-
-		/* If waiting fails, just fall through, presumably reading input will fail */
-		if (select(nfds + 1, &rfds, NULL, NULL, NULL) < 0)
-			return 1;
-
-		if (FD_ISSET(fd, &rfds)) {
-			return 1;
-
-		} else if (netlink_fd >= 0 && FD_ISSET(netlink_fd, &rfds)) {
-			if (!process_netlink())
-				continue;
-
-		/* Just drain the inotify buffer */
-		} else if (inotify_fd >= 0 && FD_ISSET(inotify_fd, &rfds)) {
-			while (read(inotify_fd, buffer, sizeof (buffer)) > 0);
-		}
-
-		return 0;
-	}
-}
-#endif  /* AGETTY_RELOAD */
-#endif
-
-static void print_issue_file(struct options *op, struct termios *tp __attribute__((__unused__)))
-{
-    (void)op;
-	/* Issue not in use, start with a new line. */
-	write_all(STDOUT_FILENO, "\r\n", 2);
-}
-
-#if 0
-/* Show login prompt, optionally preceded by /etc/issue contents. */
-static void do_prompt(struct options *op, struct termios *tp)
-{
-#ifdef AGETTY_RELOAD
-again:
-#endif
-	print_issue_file(op, tp);
-
-#ifdef KDGKBLED
-	if ((op->flags & F_VCONSOLE)) {
-		int kb = 0;
-
-		if (ioctl(STDIN_FILENO, KDGKBLED, &kb) == 0) {
-			char hint[256] = { '\0' };
-			int nl = 0;
-
-			if (access(_PATH_NUMLOCK_ON, F_OK) == 0)
-				nl = 1;
-
-			if (nl && (kb & 0x02) == 0)
-				append(hint, sizeof(hint), NULL, _("Num Lock off"));
-
-			else if (nl == 0 && (kb & 2) && (kb & 0x20) == 0)
-				append(hint, sizeof(hint), NULL, _("Num Lock on"));
-
-			if ((kb & 0x04) && (kb & 0x40) == 0)
-				append(hint, sizeof(hint), ", ", _("Caps Lock on"));
-
-			if ((kb & 0x01) && (kb & 0x10) == 0)
-				append(hint, sizeof(hint), ", ",  _("Scroll Lock on"));
-
-			if (*hint)
-				printf(_("Hint: %s\n\n"), hint);
-		}
-	}
-#endif /* KDGKBLED */
-		char *hn = xgethostname();
-
-		if (hn) {
-			char *dot = strchr(hn, '.');
-			char *cn = hn;
-			struct addrinfo *res = NULL;
-
-				if (dot)
-					*dot = '\0';
-
-			if (dot == NULL) {
-				struct addrinfo hints;
-
-				memset(&hints, 0, sizeof(hints));
-				hints.ai_flags = AI_CANONNAME;
-
-				if (!getaddrinfo(hn, NULL, &hints, &res)
-				    && res && res->ai_canonname)
-					cn = res->ai_canonname;
-			}
-
-			write_all(STDOUT_FILENO, cn, strlen(cn));
-			write_all(STDOUT_FILENO, " ", 1);
-
-			if (res)
-				freeaddrinfo(res);
-			free(hn);
-		}
-
-		/* Always show login prompt. */
-		write_all(STDOUT_FILENO, LOGIN, sizeof(LOGIN) - 1);
-}
-#endif
-
-#if 0
-/* Get user name, establish parity, speed, erase, kill & eol. */
-static char *get_logname(struct options *op, struct termios *tp, struct chardata *cp)
-{
-	static char logname[BUFSIZ];
-	char *bp;
-	char c;			/* input character, full eight bits */
-	char ascval;		/* low 7 bits of input character */
-	int eightbit;
-	//static char *erase[] = {	/* backspace-space-backspace */
-	//	"\010\040\010",		/* space parity */
-	//	"\010\040\010",		/* odd parity */
-	//	"\210\240\210",		/* even parity */
-	//	"\210\240\210",		/* no parity */
-	//};
-
-	/* Initialize kill, erase, parity etc. (also after switching speeds). */
-	INIT_CHARDATA(cp);
-
-	/*
-	 * Flush pending input (especially important after parsing or switching
-	 * the baud rate).
-	 */
-	if ((op->flags & F_VCONSOLE) == 0)
-		sleep(1);
-	tcflush(STDIN_FILENO, TCIFLUSH);
-
-	bp = logname;
-	*bp = '\0';
-
-	while (*logname == '\0') {
-		/* Write issue file and prompt */
-		do_prompt(op, tp);
-
-#ifdef AGETTY_RELOAD
-		if (!wait_for_term_input(STDIN_FILENO)) {
-			/* refresh prompt -- discard input data, clear terminal
-			 * and call do_prompt() again
-			 */
-			if ((op->flags & F_VCONSOLE) == 0)
-				sleep(1);
-			tcflush(STDIN_FILENO, TCIFLUSH);
-			if (op->flags & F_VCONSOLE)
-				termio_clear(STDOUT_FILENO);
-			bp = logname;
-			*bp = '\0';
-			continue;
-		}
-#endif
-		cp->eol = '\0';
-
-		/* Read name, watch for break and end-of-line. */
-		while (cp->eol == '\0') {
-
-			ssize_t readres;
-
-			debug("read from FD\n");
-			readres = read(STDIN_FILENO, &c, 1);
-			if (readres < 0) {
-				debug("read failed\n");
-
-				/* The terminal could be open with O_NONBLOCK when
-				 * -L (force CLOCAL) is specified...  */
-				if (errno == EINTR || errno == EAGAIN) {
-					xusleep(250000);
-					continue;
-				}
-				switch (errno) {
-				case 0:
-				case EIO:
-				case ESRCH:
-				case EINVAL:
-				case ENOENT:
-					exit_slowly(EXIT_SUCCESS);
-				default:
-					log_err(_("%s: read: %m"), op->tty);
-				}
-			}
-
-			if (readres == 0)
-				c = 0;
-
-			/* Do parity bit handling. */
-			if (eightbit)
-				ascval = c;
-			else if (c != (ascval = (c & 0177))) {
-				uint32_t bits;			/* # of "1" bits per character */
-				uint32_t mask;			/* mask with 1 bit up */
-				for (bits = 1, mask = 1; mask & 0177; mask <<= 1) {
-					if (mask & ascval)
-						bits++;
-				}
-				cp->parity |= ((bits & 1) ? 1 : 2);
-			}
-		}
-	}
-
-	if ((op->flags & F_LCUC) && (cp->capslock = caps_lock(logname))) {
-
-		/* Handle names with upper case and no lower case. */
-		for (bp = logname; *bp; bp++)
-			if (isupper(*bp))
-				*bp = tolower(*bp);		/* map name to lower case */
-	}
-
-	return logname;
-}
-#endif
-
-/* Set the final tty mode bits. */
-static void termio_final(struct options *op, struct termios *tp, struct chardata *cp)
-{
-	/* General terminal-independent stuff. */
-
-	/* 2-way flow control */
-	tp->c_iflag |= IXON | IXOFF;
-	tp->c_lflag |= ICANON | ISIG | ECHO | ECHOE | ECHOK | ECHOKE;
-	/* no longer| ECHOCTL | ECHOPRT */
-	tp->c_oflag |= OPOST;
-	/* tp->c_cflag = 0; */
-	tp->c_cc[VINTR] = DEF_INTR;
-	tp->c_cc[VQUIT] = DEF_QUIT;
-	tp->c_cc[VEOF] = DEF_EOF;
-	tp->c_cc[VEOL] = DEF_EOL;
-#ifdef __linux__
-	tp->c_cc[VSWTC] = DEF_SWITCH;
-#elif defined(VSWTCH)
-	tp->c_cc[VSWTCH] = DEF_SWITCH;
-#endif				/* __linux__ */
-
-	/* Account for special characters seen in input. */
-	if (cp->eol == CR) {
-		tp->c_iflag |= ICRNL;
-		tp->c_oflag |= ONLCR;
-	}
-	tp->c_cc[VERASE] = cp->erase;
-	tp->c_cc[VKILL] = cp->kill;
-
-	/* Account for the presence or absence of parity bits in input. */
-	switch (cp->parity) {
-	case 0:
-		/* space (always 0) parity */
-		break;
-	case 1:
-		/* odd parity */
-		tp->c_cflag |= PARODD;
-		/* fallthrough */
-	case 2:
-		/* even parity */
-		tp->c_cflag |= PARENB;
-		tp->c_iflag |= INPCK | ISTRIP;
-		/* fallthrough */
-	case (1 | 2):
-		/* no parity bit */
-		tp->c_cflag &= ~CSIZE;
-		tp->c_cflag |= CS7;
-		break;
-	}
-	/* Account for upper case without lower case. */
-	if (cp->capslock) {
-#ifdef IUCLC
-		tp->c_iflag |= IUCLC;
-#endif
-#ifdef XCASE
-		tp->c_lflag |= XCASE;
-#endif
-#ifdef OLCUC
-		tp->c_oflag |= OLCUC;
-#endif
-	}
-
-	/* Finally, make the new settings effective. */
-	if (tcsetattr(STDIN_FILENO, TCSANOW, tp) < 0)
-		log_err(_("%s: failed to set terminal attributes: %m"), op->tty);
-}
-
-#if 0
-/*
- * String contains upper case without lower case.
- * http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=52940
- * http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=156242
- */
-static int caps_lock(char *s)
-{
-	int capslock;
-
-	for (capslock = 0; *s; s++) {
-		if (islower(*s))
-			return EXIT_SUCCESS;
-		if (capslock == 0)
-			capslock = isupper(*s);
-	}
-	return capslock;
-}
-#endif
 
 static void __attribute__((__noreturn__)) usage(void)
 {
@@ -2612,14 +1168,14 @@ static void __attribute__((__noreturn__)) usage(void)
 
 	fputs(USAGE_HEADER, out);
 	fprintf(out, _(" %1$s [options] <line> [<baud_rate>,...] [<termtype>]\n"
-		       " %1$s [options] <baud_rate>,... <line> [<termtype>]\n"), program_invocation_short_name);
+			   " %1$s [options] <baud_rate>,... <line> [<termtype>]\n"), program_invocation_short_name);
 
 	fputs(USAGE_SEPARATOR, out);
 	fputs(_("Open a terminal and set its mode.\n"), out);
 
 	fputs(USAGE_OPTIONS, out);
 
-	printf(USAGE_MAN_TAIL("agetty(8)"));
+	printf(USAGE_MAN_TAIL("bangetty(8)"));
 
 	exit(EXIT_SUCCESS);
 }
@@ -2629,33 +1185,6 @@ static void __attribute__((__noreturn__)) usage(void)
  * Will be used by log_err() and log_warn() therefore
  * it takes a format as well as va_list.
  */
-#define	str2cpy(b,s1,s2)	strcat(strcpy(b,s1),s2)
-
-#if 0
-static void dolog(const char *fmt, va_list ap)
-{
-	int fd;
-	char buf[BUFSIZ];
-	char *bp;
-
-	/*
-	 * If the diagnostic is reported via syslog(3), the process name is
-	 * automatically prepended to the message. If we write directly to
-	 * /dev/console, we must prepend the process name ourselves.
-	 */
-	str2cpy(buf, program_invocation_short_name, ": ");
-	bp = buf + strlen(buf);
-	vsnprintf(bp, sizeof(buf)-strlen(buf), fmt, ap);
-
-	/* Terminate with CR-LF since the console mode is unknown. */
-	strcat(bp, "\r\n");
-	if ((fd = open("/dev/console", 1)) >= 0) {
-		write_all(fd, buf, strlen(buf));
-		close(fd);
-	}
-}
-#endif
-
 static void exit_slowly(int code)
 {
 	/* Be kind to init(8). */
@@ -2683,102 +1212,16 @@ static void log_warn(const char *fmt, ...)
 	va_end(ap);
 }
 
-#if 0
-static void print_addr(sa_family_t family, void *addr)
-{
-	char buff[INET6_ADDRSTRLEN + 1];
-
-	inet_ntop(family, addr, buff, sizeof(buff));
-	printf("%s", buff);
-}
-
-/*
- * Appends @str to @dest and if @dest is not empty then use @sep as a
- * separator. The maximal final length of the @dest is @len.
- *
- * Returns the final @dest length or -1 in case of error.
- */
-static ssize_t append(char *dest, size_t len, const char  *sep, const char *src)
-{
-	size_t dsz = 0, ssz = 0, sz;
-	char *p;
-
-	if (!dest || !len || !src)
-		return -1;
-
-	if (*dest)
-		dsz = strlen(dest);
-	if (dsz && sep)
-		ssz = strlen(sep);
-	sz = strlen(src);
-
-	if (dsz + ssz + sz + 1 > len)
-		return -1;
-
-	p = dest + dsz;
-	if (ssz) {
-		memcpy(p, sep, ssz);
-		p += ssz;
-	}
-	memcpy(p, src, sz);
-	*(p + sz) = '\0';
-
-	return dsz + ssz + sz;
-}
-#endif
-
-/*
- * Do not allow the user to pass an option as a user name
- * To be more safe: Use `--' to make sure the rest is
- * interpreted as non-options by the program, if it supports it.
- */
-static void check_username(const char* nm)
-{
-	const char *p = nm;
-	if (!nm)
-		goto err;
-	if (strlen(nm) > 42)
-		goto err;
-	while (isspace(*p))
-		p++;
-	if (*p == '-')
-		goto err;
-	return;
-err:
-	errno = EPERM;
-	log_err(_("checkname failed: %m"));
-}
-
-static void reload_agettys(void)
-{
-#ifdef AGETTY_RELOAD
-	int fd = open(AGETTY_RELOAD_FILENAME, O_CREAT|O_CLOEXEC|O_WRONLY,
-					      S_IRUSR|S_IWUSR);
-	if (fd < 0)
-		err(EXIT_FAILURE, _("cannot open %s"), AGETTY_RELOAD_FILENAME);
-
-	if (futimens(fd, NULL) < 0 || close(fd) < 0)
-		err(EXIT_FAILURE, _("cannot touch file %s"),
-		    AGETTY_RELOAD_FILENAME);
-#else
-	/* very unusual */
-	errx(EXIT_FAILURE, _("--reload is unsupported on your system"));
-#endif
-}
-
 int main(int argc, char **argv)
 {
-	char *username = NULL;			/* login name, given to /bin/login */
 	struct chardata chardata;		/* will be set by get_logname() */
 	struct termios termios;			/* terminal mode bits */
-	struct options options = {
-		.tty    = "tty1"		/* default tty line */
+	struct nlogin_context options = {
+		.tty    = "/dev/tty1"		/* default tty line */
 	};
-	//char *login_argv[LOGIN_ARGV_MAX + 1];
-	//int login_argc = 0;
 	struct sigaction sa, sa_hup, sa_quit, sa_int;
 	sigset_t set;
-    login_ui_t *lui;
+	login_ui_t *lui;
 
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
@@ -2805,10 +1248,8 @@ int main(int argc, char **argv)
 	/* Parse command-line arguments. */
 	parse_args(argc, argv, &options);
 
-	/* Update the utmp file. */
-#ifdef	SYSV_STYLE
+	/* Update the utmp file before login */
 	update_utmp(&options);
-#endif
 
 	debug("calling open_tty\n");
 
@@ -2827,74 +1268,27 @@ int main(int argc, char **argv)
 	debug("calling termio_init\n");
 	termio_init(&options, &termios);
 
-	if (options.flags & F_VCONSOLE || options.clocal != CLOCAL_MODE_ALWAYS)
+	if (options.flags & F_VCONSOLE)
 		/* Go to blocking mode unless -L is specified, this change
 		 * affects stdout, stdin and stderr as all the file descriptors
 		 * are created by dup().   */
 		fcntl(STDOUT_FILENO, F_SETFL,
-		      fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
-
-	/* Set the optional timer. */
-	if (options.timeout)
-		alarm(options.timeout);
-
-	/* Optionally wait for CR or LF before writing /etc/issue */
-	if (serial_tty_option(&options, F_WAITCRLF)) {
-		char ch;
-
-		debug("waiting for cr-lf\n");
-		while (read(STDIN_FILENO, &ch, 1) == 1) {
-			/* Strip "parity bit". */
-			ch &= 0x7f;
-#ifdef DEBUGGING
-			fprintf(dbf, "read %c\n", ch);
-#endif
-			if (ch == '\n' || ch == '\r')
-				break;
-		}
-	}
+			  fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 
 	INIT_CHARDATA(&chardata);
-
-	print_issue_file(&options, &termios);
-
-	/* Disable timer. */
-	if (options.timeout)
-		alarm(0);
-
-	if ((options.flags & F_VCONSOLE) == 0) {
-		/* Finalize the termios settings. */
-		termio_final(&options, &termios, &chardata);
-
-		/* Now the newline character should be properly written. */
-		write_all(STDOUT_FILENO, "\r\n", 2);
-	}
 
 	sigaction(SIGQUIT, &sa_quit, NULL);
 	sigaction(SIGINT, &sa_int, NULL);
 
-	if (username)
-		check_username(username);
+	lui = setup_login_screen();
+	run_login_loop(lui);
+	teardown_login_screen(lui);
+    debug("Tore down UI screen, next login_now()\n");
 
-	//login_argv[login_argc] = NULL;	/* last login argv */
-
-	if (options.nice && nice(options.nice) < 0)
-		log_warn(_("%s: can't change process priority: %m"),
-			 options.tty);
-
-	free(options.osrelease);
+	/* Also updates utmp */
+	login_now(argc, argv);
 #ifdef DEBUGGING
 	if (close_stream(dbf) != 0)
 		log_err("write failed: %s", DEBUG_OUTPUT);
 #endif
-
-	/* Let the login program take care of password validation. */
-	//execv(options.login, login_argv);
-	//log_err(_("%s: can't exec %s: %m"), options.tty, login_argv[0]);
-
-    lui = setup_login_screen();
-    run_login_loop(lui);
-    teardown_login_screen(lui);
-
-    login_now(argc, argv);
 }
