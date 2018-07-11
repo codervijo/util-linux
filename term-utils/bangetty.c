@@ -137,7 +137,7 @@ typedef struct ban_ui_s {
 ban_ui_t *setup_first_screen(void);
 int  run_ui_loop(ban_ui_t *lui);
 int  teardown_first_screen(ban_ui_t *lui);
-void login_now(int startsh, int argc, char **argv);
+void login_now(int startsh, struct ban_context *cxt, int argc, char **argv);
 
 ban_ui_t *setup_first_screen(void)
 {
@@ -323,28 +323,22 @@ static void chown_tty(struct ban_context *cxt)
 		chmod_err(cxt->tty_name, cxt->tty_mode);
 }
 
-/*
- * Reads the current terminal path and initializes cxt->tty_* variables.
- */
-static void init_tty(struct ban_context *cxt)
+static void init_ban_ctx(struct ban_context *cxt)
 {
 	struct stat st;
-	struct termios tt, ttt;
+
 #define BAN_TTY "/dev/tty1"
+
+	debug("setting username to root");
+	cxt->username = xmalloc(10); /* XXX free, or better way to set it */
+	memset(cxt->username, 0, 10);
+	strcpy(cxt->username, "root");
+	debug("set username to root");
 
         cxt->tty_path   = xmalloc(strlen(BAN_TTY));
 	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
         cxt->tty_name   = cxt->tty_path + 3;
         cxt->tty_number = cxt->tty_path + 8; 
-
-	/*
-	 * In case login is suid it was possible to use a hardlink as stdin
-	 * and exploit races for a local root exploit. (Wojciech Purczynski).
-	 *
-	 * More precisely, the problem is  ttyn := ttyname(0); ...; chown(ttyn);
-	 * here ttyname() might return "/tmp/x", a hardlink to a pseudotty.
-	 * All of this is a problem only when login is suid, which it isn't.
-	 */
 	if (!cxt->tty_path || !*cxt->tty_path ||
 		lstat(cxt->tty_path, &st) != 0 || !S_ISCHR(st.st_mode) ||
 		(st.st_nlink > 1 && strncmp(cxt->tty_path, "/dev/", 5)) ||
@@ -353,6 +347,14 @@ static void init_tty(struct ban_context *cxt)
 		syslog(LOG_ERR, _("FATAL: bad tty"));
 		sleepexit(EXIT_FAILURE);
 	}
+}
+
+/*
+ * Reads the current terminal path and initializes cxt->tty_* variables.
+ */
+static void init_tty(struct ban_context *cxt)
+{
+	struct termios tt, ttt;
 
 	tcgetattr(0, &tt);
 	ttt = tt;
@@ -554,17 +556,13 @@ static void init_environ(struct ban_context *cxt)
 }
 
 
-void login_now(int startsh, int argc, char **argv)
+void login_now(int startsh, struct ban_context *cxt, int argc, char **argv)
 {
 	char *childArgv[10];
 	char *buff;
 	int childArgc = 0;
 	struct passwd *pwd;
 
-	struct ban_context cxt = {
-		.tty_mode = TTY_MODE,		  /* tty chmod() */
-		.pid = getpid(),		  /* PID */
-	};
 
 	debug("inside login_now");
 	signal(SIGQUIT, SIG_IGN);
@@ -572,12 +570,6 @@ void login_now(int startsh, int argc, char **argv)
 
 	setpriority(PRIO_PROCESS, 0, 0);
 	//initproctitle(argc, argv);
-
-	debug("setting username to root");
-	cxt.username = xmalloc(10); /* XXX free, or better way to set it */
-	memset(cxt.username, 0, 10);
-	strcpy(cxt.username, "root");
-	debug("set username to root");
 
 #if 0
 	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
@@ -587,22 +579,22 @@ void login_now(int startsh, int argc, char **argv)
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
 	debug("after setpgrp\n");
-	init_tty(&cxt);
+	init_tty(cxt);
 
 	debug("about to open logs\n");
 	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
 	debug("logs opened\n");
 
 	debug("before xgetpwnam\n");
-	cxt.pwd = xgetpwnam(cxt.username, &cxt.pwdbuf);
-	if (!cxt.pwd) {
+	cxt->pwd = xgetpwnam(cxt->username, &cxt->pwdbuf);
+	if (!cxt->pwd) {
 		warnx(_("\nSession setup problem, abort."));
 		syslog(LOG_ERR, _("Invalid user name \"%s\" in %s:%d. Abort."),
-			   cxt.username, __FUNCTION__, __LINE__);
+			   cxt->username, __FUNCTION__, __LINE__);
 		sleepexit(EXIT_FAILURE);
 	}
 
-	pwd = cxt.pwd;
+	pwd = cxt->pwd;
 	//cxt.username = pwd->pw_name;
 	debug("set username cxt.username\n");
 
@@ -610,9 +602,9 @@ void login_now(int startsh, int argc, char **argv)
 
 	endpwent();
 
-	log_lastlog(&cxt);
+	log_lastlog(cxt);
 
-	chown_tty(&cxt);
+	chown_tty(cxt);
 
 	if (setgid(pwd->pw_gid) < 0 && pwd->pw_gid) {
 		syslog(LOG_ALERT, _("setgid() failed"));
@@ -622,11 +614,11 @@ void login_now(int startsh, int argc, char **argv)
 	if (pwd->pw_shell == NULL || *pwd->pw_shell == '\0')
 		pwd->pw_shell = _PATH_BSHELL;
 
-	init_environ(&cxt);		/* init $HOME, $TERM ... */
+	init_environ(cxt);		/* init $HOME, $TERM ... */
 
 	//setproctitle(PRG_NAME, cxt.username);
 
-	log_syslog(&cxt);
+	log_syslog(cxt);
 
 	motd();
 
@@ -990,8 +982,10 @@ int main(int argc, char **argv)
         int    startsh;
 	struct chardata chardata;		/* will be set by get_logname() */
 	struct termios termios;			/* terminal mode bits */
-	struct ban_context options = {
-		.tty    = "/dev/tty1"		/* default tty line */
+	struct ban_context cxt = {
+		.tty    = "/dev/tty1",		/* default tty line */
+		.tty_mode = TTY_MODE,		  /* tty chmod() */
+		.pid = getpid(),		  /* PID */
 	};
 	struct sigaction sa, sa_hup, sa_quit, sa_int;
 	sigset_t set;
@@ -1020,15 +1014,18 @@ int main(int argc, char **argv)
 #endif				/* DEBUGGING */
 
 	/* Parse command-line arguments. */
-	parse_args(argc, argv, &options);
+	parse_args(argc, argv, &cxt);
+
+        init_ban_ctx(&cxt);
+
 
 	/* Update the utmp file before login */
-	update_utmp(&options);
+	update_utmp(&cxt);
 
 	debug("calling open_tty\n");
 
 	/* Open the tty as standard { input, output, error }. */
-	open_tty(options.tty, &termios, &options);
+	open_tty(cxt.tty, &termios, &cxt);
 
 	/* Unmask SIGHUP if inherited */
 	sigemptyset(&set);
@@ -1040,9 +1037,9 @@ int main(int argc, char **argv)
 
 	/* Initialize the termios settings (raw mode, eight-bit, blocking i/o). */
 	debug("calling termio_init\n");
-	termio_init(&options, &termios);
+	termio_init(&cxt, &termios);
 
-	if (options.flags & F_VCONSOLE)
+	if (cxt.flags & F_VCONSOLE)
 		/* Go to blocking mode unless -L is specified, this change
 		 * affects stdout, stdin and stderr as all the file descriptors
 		 * are created by dup().   */
@@ -1061,7 +1058,7 @@ int main(int argc, char **argv)
         debug("Tore down UI screen, next login_now()\n");
 
 	/* Also updates utmp */
-	login_now(startsh, argc, argv);
+	login_now(startsh, &cxt, argc, argv);
 #ifdef DEBUGGING
 	if (close_stream(dbf) != 0)
 		log_err("write failed: %s", DEBUG_OUTPUT);
