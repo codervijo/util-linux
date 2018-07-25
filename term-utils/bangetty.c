@@ -94,6 +94,7 @@ struct ban_context {
 	char		    *pwdbuf;	           /* pwd strings */
 	pid_t		     pid;
 	int                  flags;	  	   /* toggle switches, see below */
+	int                  startsh;              /* Spawn shell */
 	char                *tty;		   /* name of tty */
 	char                *term;	    	   /* terminal type */
 };
@@ -137,7 +138,7 @@ typedef struct ban_ui_s {
 ban_ui_t *setup_first_screen(void);
 int  run_ui_loop(ban_ui_t *lui);
 int  teardown_first_screen(ban_ui_t *lui);
-void login_now(int startsh, struct ban_context *cxt, int argc, char **argv);
+void login_now(struct ban_context *cxt, int argc, char **argv);
 
 ban_ui_t *setup_first_screen(void)
 {
@@ -556,7 +557,7 @@ static void init_environ(struct ban_context *cxt)
 }
 
 
-void login_now(int startsh, struct ban_context *cxt, int argc, char **argv)
+void login_now(struct ban_context *cxt, int argc, char **argv)
 {
 	char *childArgv[10];
 	char *buff;
@@ -647,7 +648,7 @@ void login_now(int startsh, struct ban_context *cxt, int argc, char **argv)
         childArgc              = 0;
 	childArgv[childArgc++] = "/bin/bash";
 	childArgv[childArgc++] = "-sh";
-	if (startsh == 0 && argc > 1) {
+	if (cxt->startsh == 0 && argc > 1) {
 		debug("handling argc\n");
                 printf("%d arguments are {%s}-{%s}\n", argc, argv[0], argv[1]);
 		buff = xmalloc(strlen(argv[1]) + 6);
@@ -657,7 +658,7 @@ void login_now(int startsh, struct ban_context *cxt, int argc, char **argv)
 		childArgv[childArgc++] = "-c";
 		childArgv[childArgc++] = buff;
 	}
-    childArgv[childArgc++] = NULL;
+        childArgv[childArgc++] = NULL;
 
 	execvp(childArgv[0], childArgv + 1);
 
@@ -979,13 +980,13 @@ static void log_warn(const char *fmt, ...)
 
 int main(int argc, char **argv)
 {
-        int    startsh;
 	struct chardata chardata;		/* will be set by get_logname() */
 	struct termios termios;			/* terminal mode bits */
 	struct ban_context cxt = {
 		.tty    = "/dev/tty1",		/* default tty line */
 		.tty_mode = TTY_MODE,		  /* tty chmod() */
 		.pid = getpid(),		  /* PID */
+                .startsh = 0,
 	};
 	struct sigaction sa, sa_hup, sa_quit, sa_int;
 	sigset_t set;
@@ -1051,14 +1052,13 @@ int main(int argc, char **argv)
 	sigaction(SIGQUIT, &sa_quit, NULL);
 	sigaction(SIGINT, &sa_int, NULL);
 
-        startsh = 0;
 	lui = setup_first_screen();
-	startsh = run_ui_loop(lui);
+	cxt.startsh = run_ui_loop(lui);
 	teardown_first_screen(lui);
         debug("Tore down UI screen, next login_now()\n");
 
 	/* Also updates utmp */
-	login_now(startsh, &cxt, argc, argv);
+	login_now(&cxt, argc, argv);
 #ifdef DEBUGGING
 	if (close_stream(dbf) != 0)
 		log_err("write failed: %s", DEBUG_OUTPUT);
