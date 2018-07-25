@@ -102,7 +102,7 @@ struct ban_context {
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
 #define F_VCONSOLE	   (1<<12)	/* This is a virtual console */
 
-static void parse_args(int argc, char **argv, struct ban_context *op);
+static void parse_args(int argc, char **argv);
 static void update_utmp(struct ban_context *op);
 static void open_tty(char *tty, struct termios *tp, struct ban_context *op);
 static void termio_init(struct ban_context *op, struct termios *tp);
@@ -111,8 +111,6 @@ static void usage(void) __attribute__((__noreturn__));
 static void exit_slowly(int code) __attribute__((__noreturn__));
 static void log_err(const char *, ...) __attribute__((__noreturn__))
 				   __attribute__((__format__(printf, 1, 2)));
-static void log_warn (const char *, ...)
-				__attribute__((__format__(printf, 1, 2)));
 
 #ifdef DEBUGGING
 # include "closestream.h"
@@ -135,15 +133,18 @@ typedef struct ban_ui_s {
         WINDOW  *borderwin;
 } ban_ui_t;
 
-ban_ui_t *setup_first_screen(void);
+ban_ui_t *setup_first_screen(struct ban_context *cxt);
 int  run_ui_loop(ban_ui_t *lui);
 int  teardown_first_screen(ban_ui_t *lui);
 void login_now(struct ban_context *cxt, int argc, char **argv);
+void prep_terminal(struct ban_context *cxt);
 
-ban_ui_t *setup_first_screen(void)
+ban_ui_t *setup_first_screen(struct ban_context *cxt)
 {
 	ban_ui_t *lui;
+        struct  termios termios;
 
+	open_tty(cxt->tty, &termios, cxt);
 	/* Initialize curses */
 	initscr();
 	start_color();
@@ -372,6 +373,15 @@ static void init_tty(struct ban_context *cxt)
 
 	/* open stdin,stdout,stderr to the tty */
         //	open_tty(cxt->tty_path);
+	debug("calling open_tty\n");
+
+	/* Open the tty as standard { input, output, error }. */
+	open_tty(cxt->tty, &tt, cxt);
+
+	/* Initialize the termios settings (raw mode, eight-bit, blocking i/o). */
+	debug("calling termio_init\n");
+	termio_init(cxt, &tt);
+
 
 	/* restore tty modes */
 	tcsetattr(0, TCSAFLUSH, &tt);
@@ -556,6 +566,14 @@ static void init_environ(struct ban_context *cxt)
 	xsetenv("LOGNAME", pwd->pw_name, 1);
 }
 
+void prep_terminal(struct ban_context *cxt)
+{
+	tcsetpgrp(STDIN_FILENO, getpid());
+
+	init_tty(cxt);
+
+	chown_tty(cxt);
+}
 
 void login_now(struct ban_context *cxt, int argc, char **argv)
 {
@@ -573,14 +591,13 @@ void login_now(struct ban_context *cxt, int argc, char **argv)
 	//initproctitle(argc, argv);
 
 #if 0
-	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
+	for (int cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
 		close(cnt);
 #endif
 	debug("before setpgrp");
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
 	debug("after setpgrp\n");
-	init_tty(cxt);
 
 	debug("about to open logs\n");
 	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
@@ -605,7 +622,7 @@ void login_now(struct ban_context *cxt, int argc, char **argv)
 
 	log_lastlog(cxt);
 
-	chown_tty(cxt);
+        prep_terminal(cxt);
 
 	if (setgid(pwd->pw_gid) < 0 && pwd->pw_gid) {
 		syslog(LOG_ALERT, _("setgid() failed"));
@@ -688,7 +705,7 @@ static void output_version(void)
 }
 
 /* Parse command-line arguments. */
-static void parse_args(int argc, char **argv, struct ban_context *op)
+static void parse_args(int argc, char **argv)
 {
 	int c;
 
@@ -715,9 +732,6 @@ static void parse_args(int argc, char **argv, struct ban_context *op)
 			errtryhelp(EXIT_FAILURE);
 		}
 	}
-
-	debug("after getopt loop\n");
-
 
 	debug("exiting parseargs\n");
 }
@@ -803,7 +817,7 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 	 */
 	if (fchown(fd, 0, gid) || fchmod(fd, (gid ? 0620 : 0600))) {
 		if (errno == EROFS)
-			log_warn("%s: %m", tty);
+			warn("%s: %m", tty);
 		else
 			log_err("%s: %m", tty);
 	}
@@ -818,7 +832,7 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 
 	if (((tid = tcgetsid(fd)) < 0) || (pid != tid)) {
 		if (ioctl(fd, TIOCSCTTY, 1) == -1)
-			log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
+			warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
 	}
 
 	close(STDIN_FILENO);
@@ -832,7 +846,7 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 
 	if (((tid = tcgetsid(STDIN_FILENO)) < 0) || (pid != tid)) {
 		if (ioctl(STDIN_FILENO, TIOCSCTTY, 1) == -1)
-			log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
+			warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
 	}
 
 
@@ -845,9 +859,15 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 		log_err(_("%s: not open for read/write"), tty);
 
 
+#if 1
 	if (tcsetpgrp(STDIN_FILENO, pid))
-		log_warn(_("/dev/%s: cannot set process group: %m"), tty);
+		warn(_("/dev/%s: cannot set process group: %m"), tty);
+#else
+	tcsetpgrp(STDIN_FILENO, pid);
+#endif
+        
 
+debug("closing\n");
 	/* Get rid of the present outputs. */
 	if (!closed) {
 		close(STDOUT_FILENO);
@@ -856,7 +876,7 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 	}
 
 	/* Set up standard output and standard error file descriptors. */
-	debug("duping\n");
+	debug("duping stdin to fd:1 and fd:2\n");
 
 	/* set up stdout and stderr */
 	if (dup(STDIN_FILENO) != 1 || dup(STDIN_FILENO) != 2)
@@ -920,7 +940,7 @@ static void reset_vc(const struct ban_context *op, struct termios *tp)
 	reset_virtual_console(tp, fl);
 
 	if (tcsetattr(STDIN_FILENO, TCSADRAIN, tp))
-		log_warn(_("setting terminal attributes failed: %m"));
+		warn(_("setting terminal attributes failed: %m"));
 
 	/* Go to blocking input even in local mode. */
 	fcntl(STDIN_FILENO, F_SETFL,
@@ -948,7 +968,7 @@ static void __attribute__((__noreturn__)) usage(void)
 
 /*
  * Helper function reports errors to console or syslog.
- * Will be used by log_err() and log_warn() therefore
+ * Will be used by log_err()  therefore
  * it takes a format as well as va_list.
  */
 static void exit_slowly(int code)
@@ -969,19 +989,10 @@ static void log_err(const char *fmt, ...)
 	exit_slowly(EXIT_FAILURE);
 }
 
-static void log_warn(const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	//dolog(LOG_WARNING, fmt, ap);
-	va_end(ap);
-}
 
 int main(int argc, char **argv)
 {
 	struct chardata chardata;		/* will be set by get_logname() */
-	struct termios termios;			/* terminal mode bits */
 	struct ban_context cxt = {
 		.tty    = "/dev/tty1",		/* default tty line */
 		.tty_mode = TTY_MODE,		  /* tty chmod() */
@@ -1015,30 +1026,18 @@ int main(int argc, char **argv)
 #endif				/* DEBUGGING */
 
 	/* Parse command-line arguments. */
-	parse_args(argc, argv, &cxt);
+	parse_args(argc, argv);
 
         init_ban_ctx(&cxt);
 
-
 	/* Update the utmp file before login */
 	update_utmp(&cxt);
-
-	debug("calling open_tty\n");
-
-	/* Open the tty as standard { input, output, error }. */
-	open_tty(cxt.tty, &termios, &cxt);
 
 	/* Unmask SIGHUP if inherited */
 	sigemptyset(&set);
 	sigaddset(&set, SIGHUP);
 	sigprocmask(SIG_UNBLOCK, &set, NULL);
 	sigaction(SIGHUP, &sa_hup, NULL);
-
-	tcsetpgrp(STDIN_FILENO, getpid());
-
-	/* Initialize the termios settings (raw mode, eight-bit, blocking i/o). */
-	debug("calling termio_init\n");
-	termio_init(&cxt, &termios);
 
 	if (cxt.flags & F_VCONSOLE)
 		/* Go to blocking mode unless -L is specified, this change
@@ -1052,7 +1051,7 @@ int main(int argc, char **argv)
 	sigaction(SIGQUIT, &sa_quit, NULL);
 	sigaction(SIGINT, &sa_int, NULL);
 
-	lui = setup_first_screen();
+	lui = setup_first_screen(&cxt);
 	cxt.startsh = run_ui_loop(lui);
 	teardown_first_screen(lui);
         debug("Tore down UI screen, next login_now()\n");
