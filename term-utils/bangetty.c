@@ -87,7 +87,6 @@ FILE *dbf;
 struct ban_context {
 	char	            *tty_path;	           /* ttyname() return value */
 	const char	    *tty_name;	           /* tty_path without /dev prefix */
-	const char	    *tty_number;	   /* end of the tty_path */
 	mode_t		     tty_mode;	           /* chmod() mode */
 	char		    *username;	           /* from command line or PAM */
 	struct passwd       *pwd;	           /* user info */
@@ -96,7 +95,6 @@ struct ban_context {
 	int                  flags;	  	   /* toggle switches, see below */
 	int                  startsh;              /* Spawn shell */
 	char                *tty;		   /* name of tty */
-	char                *term;	    	   /* terminal type */
 };
 
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
@@ -139,6 +137,20 @@ int  teardown_first_screen(ban_ui_t *lui);
 void login_now(struct ban_context *cxt, int argc, char **argv);
 void prep_terminal(struct ban_context *cxt);
 void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **argv);
+inline void print_message(ban_ui_t *lui);
+
+inline void print_message(ban_ui_t *lui)
+{
+        wattron(lui->bodywin, A_BOLD);
+        wattron(lui->bodywin, COLOR_PAIR(2));
+        mvwprintw(lui->bodywin, LINES/2-2, COLS/2-20, "Please press ");
+        wattron(lui->bodywin, COLOR_PAIR(3));
+        wattron(lui->bodywin, A_STANDOUT);
+        wprintw(lui->bodywin, "Enter");
+        wattroff(lui->bodywin, A_STANDOUT);
+        wattron(lui->bodywin, COLOR_PAIR(2));
+        wprintw(lui->bodywin, " to start install.....");
+}
 
 ban_ui_t *setup_first_screen(struct ban_context *cxt)
 {
@@ -168,16 +180,8 @@ ban_ui_t *setup_first_screen(struct ban_context *cxt)
         wattron(lui->borderwin, A_BOLD);
         box(lui->borderwin, 0, 0);
 
-        wattron(lui->bodywin, A_BOLD);
-        wattron(lui->bodywin, COLOR_PAIR(2));
-        mvwprintw(lui->bodywin, LINES/2-2, COLS/2-20, "Please press ");
-        wattron(lui->bodywin, COLOR_PAIR(3));
-        wattron(lui->bodywin, A_STANDOUT);
-        wprintw(lui->bodywin, "Enter");
-        wattroff(lui->bodywin, A_STANDOUT);
-        wattron(lui->bodywin, COLOR_PAIR(2));
-        wprintw(lui->bodywin, " to start install.....");
-
+        print_message(lui);
+ 
 	keypad(stdscr, TRUE);
         keypad(lui->bodywin, TRUE);
 
@@ -341,7 +345,6 @@ static void init_ban_ctx(struct ban_context *cxt)
         cxt->tty_path   = xmalloc(strlen(BAN_TTY));
 	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
         cxt->tty_name   = cxt->tty_path + 3;
-        cxt->tty_number = cxt->tty_path + 8; 
 	if (!cxt->tty_path || !*cxt->tty_path ||
 		lstat(cxt->tty_path, &st) != 0 || !S_ISCHR(st.st_mode) ||
 		(st.st_nlink > 1 && strncmp(cxt->tty_path, "/dev/", 5)) ||
@@ -373,7 +376,6 @@ static void init_tty(struct ban_context *cxt)
 	//tcsetattr(0, TCSANOW, &ttt);
 
 	/* open stdin,stdout,stderr to the tty */
-        //	open_tty(cxt->tty_path);
 	debug("calling open_tty\n");
 
 	/* Open the tty as standard { input, output, error }. */
@@ -520,7 +522,6 @@ static void fork_session(void)
 	setsid();
 
 	/* make sure we have a controlling tty */
-	//open_tty(cxt->tty_path);
 	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);	/* reopen */
 
 	/*
