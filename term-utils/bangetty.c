@@ -968,12 +968,26 @@ static void exit_slowly(int code)
 	exit(code);
 }
 
+static void dolog(int priority, const char *fmt, va_list ap)
+{
+	char buf[BUFSIZ];
+	char *bp;
+
+	buf[0] = '\0';
+	bp = buf;
+	vsnprintf(bp, sizeof(buf)-strlen(buf), fmt, ap);
+
+	openlog(program_invocation_short_name, LOG_PID, LOG_AUTHPRIV);
+	syslog(priority, "%s", buf);
+	closelog();
+}
+
 static void log_err(const char *fmt, ...)
 {
 	va_list ap;
 
 	va_start(ap, fmt);
-	//dolog(LOG_ERR, fmt, ap);
+	dolog(LOG_ERR, fmt, ap);
 	va_end(ap);
 
 	exit_slowly(EXIT_FAILURE);
