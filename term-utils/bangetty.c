@@ -60,17 +60,6 @@
 #define SYSV_STYLE
 #define DEBUGGING 1
 
-#ifdef DEBUGGING
-# include "closestream.h"
-# ifndef DEBUG_OUTPUT
-#  define DEBUG_OUTPUT "/dev/tty10"
-# endif
-# define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
-FILE *dbf;
-#else
-# define debug(s) do { ; } while (0)
-#endif
-
 #ifdef USE_TTY_GROUP
 # define TTY_MODE 0620
 #else
@@ -117,6 +106,7 @@ static void log_err(const char *, ...) __attribute__((__noreturn__))
 # endif
 # define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
 FILE *dbf;
+void debug_init(int argc, char **argv);
 #else
 # define debug(s) do { ; } while (0)
 #endif
@@ -135,9 +125,10 @@ ban_ui_t *setup_first_screen(struct ban_context *cxt);
 int  run_ui_loop(ban_ui_t *lui);
 int  teardown_first_screen(ban_ui_t *lui);
 void login_now(struct ban_context *cxt, int argc, char **argv);
-void prep_terminal(struct ban_context *cxt);
+void prepare_init(struct ban_context *cxt);
 void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **argv);
 inline void print_message(ban_ui_t *lui);
+static inline void setup_stdin(char *tty);
 
 inline void print_message(ban_ui_t *lui)
 {
@@ -441,7 +432,7 @@ static void log_syslog(struct ban_context *cxt)
 			   cxt->tty_name, pwd->pw_name);
 
 	if (!pwd->pw_uid) {
-		syslog(LOG_NOTICE, _("ROOT LOGIN ON %s"), cxt->tty_name);
+		syslog(LOG_NOTICE, _("ROOT LOGIN ON %s using BANGETTY!!"), cxt->tty_name);
 	} else {
 		syslog(LOG_NOTICE, _("NON-ROOT LOGIN ON %s using BANGETTY!!"),
 			   cxt->tty_name);
@@ -568,13 +559,33 @@ static void init_environ(struct ban_context *cxt)
 	xsetenv("LOGNAME", pwd->pw_name, 1);
 }
 
-void prep_terminal(struct ban_context *cxt)
+void prepare_init(struct ban_context *cxt)
 {
+	struct passwd *pwd;
+
 	tcsetpgrp(STDIN_FILENO, getpid());
 
 	init_tty(cxt);
 
 	chown_tty(cxt);
+
+	pwd = cxt->pwd;
+	if (setgid(pwd->pw_gid) < 0 && pwd->pw_gid) {
+		syslog(LOG_ALERT, _("setgid() failed"));
+		exit(EXIT_FAILURE);
+	}
+
+	if (pwd->pw_shell == NULL || *pwd->pw_shell == '\0')
+		pwd->pw_shell = _PATH_BSHELL;
+
+	init_environ(cxt);		/* init $HOME, $TERM ... */
+
+	//setproctitle(PRG_NAME, cxt.username);
+
+	log_syslog(cxt);
+
+	motd();
+
 }
 
 void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **argv)
@@ -645,28 +656,10 @@ void login_now(struct ban_context *cxt, int argc, char **argv)
 	debug("set username cxt.username\n");
 
 	setgroups(0, NULL);/* root */
-
 	endpwent();
-
 	log_lastlog(cxt);
 
-        prep_terminal(cxt);
-
-	if (setgid(pwd->pw_gid) < 0 && pwd->pw_gid) {
-		syslog(LOG_ALERT, _("setgid() failed"));
-		exit(EXIT_FAILURE);
-	}
-
-	if (pwd->pw_shell == NULL || *pwd->pw_shell == '\0')
-		pwd->pw_shell = _PATH_BSHELL;
-
-	init_environ(cxt);		/* init $HOME, $TERM ... */
-
-	//setproctitle(PRG_NAME, cxt.username);
-
-	log_syslog(cxt);
-
-	motd();
+        prepare_init(cxt);
 
 	/*
 	 * Detach the controlling terminal, fork, and create a new session
@@ -796,29 +789,18 @@ static void update_utmp(struct ban_context *op)
 	updwtmpx(_PATH_WTMP, &ut);
 }
 
-/* Set up tty as stdin, stdout & stderr. */
-static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
+static inline void setup_stdin(char *tty)
 {
-	const pid_t pid = getpid();
-	int closed = 0;
-        int serial;
         int fd;
 	pid_t tid;
 	gid_t gid = 0;
+	const pid_t pid = getpid();
 	struct stat st;
 
-	/* Set up new standard input, unless we are given an already opened port. */
- 
 	/* Open the tty as standard input. */
 	if ((fd = open(tty, O_RDWR|O_NOCTTY|O_NONBLOCK, 0)) < 0)
 		log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
 
-	/*
-	 * There is always a race between this reset and the call to
-	 * vhangup() that s.o. can use to get access to your tty.
-	 * Linux login(1) will change tty permissions. Use root owner and group
-	 * with permission -rw------- for the period between getty and login.
-	 */
 	if (fchown(fd, 0, gid) || fchmod(fd, (gid ? 0620 : 0600))) {
 		if (errno == EROFS)
 			warn("%s: %m", tty);
@@ -840,19 +822,30 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 	}
 
 	close(STDIN_FILENO);
-	errno = 0;
-
 	close(fd);
+	errno = 0;
 
 	debug("open(2)\n");
 	if (open(tty, O_RDWR|O_NOCTTY|O_NONBLOCK, 0) != 0)
 		log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
 
+}
+
+
+/* Set up tty as stdin, stdout & stderr. */
+static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
+{
+	const pid_t pid = getpid();
+        int serial;
+	pid_t tid;
+
+	/* Set up new standard input, unless we are given an already opened port. */
+        setup_stdin(tty); 
+
 	if (((tid = tcgetsid(STDIN_FILENO)) < 0) || (pid != tid)) {
 		if (ioctl(STDIN_FILENO, TIOCSCTTY, 1) == -1)
 			warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
 	}
-
 
 	/*
 	 * Standard input should already be connected to an open port. Make
@@ -863,20 +856,14 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 		log_err(_("%s: not open for read/write"), tty);
 
 
-#if 1
 	if (tcsetpgrp(STDIN_FILENO, pid))
 		warn(_("/dev/%s: cannot set process group: %m"), tty);
-#else
-	tcsetpgrp(STDIN_FILENO, pid);
-#endif
         
 
 	/* Get rid of the present outputs. */
-	if (!closed) {
-		close(STDOUT_FILENO);
-		close(STDERR_FILENO);
-		errno = 0;
-	}
+	close(STDOUT_FILENO);
+	close(STDERR_FILENO);
+	errno = 0;
 
 	/* Set up standard output and standard error file descriptors. */
 	debug("duping stdin to fd:1 and fd:2\n");
@@ -992,6 +979,18 @@ static void log_err(const char *fmt, ...)
 	exit_slowly(EXIT_FAILURE);
 }
 
+#ifdef DEBUGGING
+void debug_init(int argc, char **argv)
+{
+	dbf = fopen(DEBUG_OUTPUT, "w");
+	for (int i = 1; i < argc; i++) {
+		if (i > 1)
+			debug(" ");
+		debug(argv[i]);
+	}
+	debug("\n");
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -1019,13 +1018,7 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &sa, &sa_int);
 
 #ifdef DEBUGGING
-	dbf = fopen(DEBUG_OUTPUT, "w");
-	for (int i = 1; i < argc; i++) {
-		if (i > 1)
-			debug(" ");
-		debug(argv[i]);
-	}
-	debug("\n");
+	debug_init(argc, argv);
 #endif				/* DEBUGGING */
 
 	/* Parse command-line arguments. */
@@ -1043,9 +1036,6 @@ int main(int argc, char **argv)
 	sigaction(SIGHUP, &sa_hup, NULL);
 
 	if (cxt.flags & F_VCONSOLE)
-		/* Go to blocking mode unless -L is specified, this change
-		 * affects stdout, stdin and stderr as all the file descriptors
-		 * are created by dup().   */
 		fcntl(STDOUT_FILENO, F_SETFL,
 			  fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
 
