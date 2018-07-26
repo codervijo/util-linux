@@ -138,6 +138,7 @@ int  run_ui_loop(ban_ui_t *lui);
 int  teardown_first_screen(ban_ui_t *lui);
 void login_now(struct ban_context *cxt, int argc, char **argv);
 void prep_terminal(struct ban_context *cxt);
+void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **argv);
 
 ban_ui_t *setup_first_screen(struct ban_context *cxt)
 {
@@ -575,17 +576,46 @@ void prep_terminal(struct ban_context *cxt)
 	chown_tty(cxt);
 }
 
-void login_now(struct ban_context *cxt, int argc, char **argv)
+void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **argv)
 {
+	int childArgc = 0;
 	char *childArgv[10];
 	char *buff;
-	int childArgc = 0;
+
+	if (chdir(pwd->pw_dir) < 0) {
+		warn(_("%s: change directory failed"), pwd->pw_dir);
+
+		if (chdir("/"))
+			warn(_("%s: change directory failed"), "/");
+		pwd->pw_dir = "/";
+		printf(_("Logging in with home = \"/\".\n"));
+	}
+
+        childArgc              = 0;
+	childArgv[childArgc++] = "/bin/bash";
+	childArgv[childArgc++] = "-sh";
+	if (cxt->startsh == 0 && argc > 1) {
+		debug("handling argc\n");
+                printf("%d arguments are {%s}-{%s}\n", argc, argv[0], argv[1]);
+		buff = xmalloc(strlen(argv[1]) + 6);
+
+		strcpy(buff, "exec ");
+		strcat(buff, argv[1]);
+		childArgv[childArgc++] = "-c";
+		childArgv[childArgc++] = buff;
+	}
+        childArgv[childArgc++] = NULL;
+
+	execvp(childArgv[0], childArgv + 1);
+
+}
+
+void login_now(struct ban_context *cxt, int argc, char **argv)
+{
 	struct passwd *pwd;
 
 
 	debug("inside login_now");
-	signal(SIGQUIT, SIG_IGN);
-	signal(SIGINT, SIG_IGN);
 
 	setpriority(PRIO_PROCESS, 0, 0);
 	//initproctitle(argc, argv);
@@ -594,16 +624,13 @@ void login_now(struct ban_context *cxt, int argc, char **argv)
 	for (int cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
 		close(cnt);
 #endif
-	debug("before setpgrp");
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
 	debug("after setpgrp\n");
 
-	debug("about to open logs\n");
 	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
 	debug("logs opened\n");
 
-	debug("before xgetpwnam\n");
 	cxt->pwd = xgetpwnam(cxt->username, &cxt->pwdbuf);
 	if (!cxt->pwd) {
 		warnx(_("\nSession setup problem, abort."));
@@ -653,31 +680,7 @@ void login_now(struct ban_context *cxt, int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	if (chdir(pwd->pw_dir) < 0) {
-		warn(_("%s: change directory failed"), pwd->pw_dir);
-
-		if (chdir("/"))
-			warn(_("%s: change directory failed"), "/");
-		pwd->pw_dir = "/";
-		printf(_("Logging in with home = \"/\".\n"));
-	}
-
-        childArgc              = 0;
-	childArgv[childArgc++] = "/bin/bash";
-	childArgv[childArgc++] = "-sh";
-	if (cxt->startsh == 0 && argc > 1) {
-		debug("handling argc\n");
-                printf("%d arguments are {%s}-{%s}\n", argc, argv[0], argv[1]);
-		buff = xmalloc(strlen(argv[1]) + 6);
-
-		strcpy(buff, "exec ");
-		strcat(buff, argv[1]);
-		childArgv[childArgc++] = "-c";
-		childArgv[childArgc++] = buff;
-	}
-        childArgv[childArgc++] = NULL;
-
-	execvp(childArgv[0], childArgv + 1);
+        spawn_child(cxt, pwd, argc, argv);
 
 	warn(_("no shell"));
 
@@ -867,7 +870,6 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 #endif
         
 
-debug("closing\n");
 	/* Get rid of the present outputs. */
 	if (!closed) {
 		close(STDOUT_FILENO);
