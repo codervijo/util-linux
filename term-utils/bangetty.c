@@ -74,15 +74,14 @@
  * Main control struct
  */
 struct ban_context {
-	char	            *tty_path;	           /* ttyname() return value */
-	const char	    *tty_name;	           /* tty_path without /dev prefix */
-	mode_t		     tty_mode;	           /* chmod() mode */
-	struct passwd       *pwd;	           /* user info */
-	char		    *pwdbuf;	           /* pwd strings */
-	pid_t		     pid;
-	int                  flags;	  	   /* toggle switches, see below */
-	int                  startsh;              /* Spawn shell */
-	char                *tty;		   /* name of tty */
+	char	        *tty_path;	   /* ttyname() return value */
+	mode_t		tty_mode;	   /* chmod() mode */
+	struct passwd   *pwd;	           /* user info */
+	char	        *pwdbuf;	   /* pwd strings */
+	pid_t	        pid;
+	int             flags;	  	   /* toggle switches, see below */
+	int             startsh;           /* Spawn shell */
+	char            *tty;		   /* name of tty */
 };
 
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
@@ -315,9 +314,9 @@ static void chown_tty(struct ban_context *cxt)
 		}
 	}
 	if (fchown(0, uid, gid))				/* tty */
-		chown_err(cxt->tty_name, uid, gid);
+		chown_err(cxt->tty, uid, gid);
 	if (fchmod(0, cxt->tty_mode))
-		chmod_err(cxt->tty_name, cxt->tty_mode);
+		chmod_err(cxt->tty, cxt->tty_mode);
 }
 
 static void init_ban_ctx(struct ban_context *cxt)
@@ -328,7 +327,6 @@ static void init_ban_ctx(struct ban_context *cxt)
 
         cxt->tty_path   = xmalloc(strlen(BAN_TTY));
 	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
-        cxt->tty_name   = cxt->tty_path + 3;
 	if (!cxt->tty_path || !*cxt->tty_path ||
 		lstat(cxt->tty_path, &st) != 0 || !S_ISCHR(st.st_mode) ||
 		(st.st_nlink > 1 && strncmp(cxt->tty_path, "/dev/", 5)) ||
@@ -401,8 +399,8 @@ static void log_lastlog(struct ban_context *cxt)
 	time(&t);
 	ll.ll_time = t;		/* ll_time is always 32bit */
 
-	if (cxt->tty_name)
-		xstrncpy(ll.ll_line, cxt->tty_name, sizeof(ll.ll_line));
+	if (cxt->tty)
+		xstrncpy(ll.ll_line, cxt->tty, sizeof(ll.ll_line));
 
 	if (write_all(fd, (char *)&ll, sizeof(ll)))
 		warn(_("write lastlog failed"));
@@ -417,18 +415,18 @@ static void log_syslog(struct ban_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
 
-	if (!cxt->tty_name)
+	if (!cxt->tty)
 		return;
 
-	if (!strncmp(cxt->tty_name, "ttyS", 4))
+	if (!strncmp(cxt->tty, "/dev/ttyS", 4))
 		syslog(LOG_INFO, _("Unsupported DIALUP AT %s BY %s"),
-			   cxt->tty_name, pwd->pw_name);
+			   cxt->tty, pwd->pw_name);
 
 	if (!pwd->pw_uid) {
-		syslog(LOG_NOTICE, _("ROOT LOGIN ON %s using BANGETTY!!"), cxt->tty_name);
+		syslog(LOG_NOTICE, _("ROOT LOGIN ON %s using BANGETTY!!"), cxt->tty);
 	} else {
 		syslog(LOG_NOTICE, _("NON-ROOT LOGIN ON %s using BANGETTY!!"),
-			   cxt->tty_name);
+			   cxt->tty);
 	}
 }
 
