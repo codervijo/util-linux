@@ -77,7 +77,6 @@ struct ban_context {
 	char	            *tty_path;	           /* ttyname() return value */
 	const char	    *tty_name;	           /* tty_path without /dev prefix */
 	mode_t		     tty_mode;	           /* chmod() mode */
-	char		    *username;	           /* from command line or PAM */
 	struct passwd       *pwd;	           /* user info */
 	char		    *pwdbuf;	           /* pwd strings */
 	pid_t		     pid;
@@ -327,12 +326,6 @@ static void init_ban_ctx(struct ban_context *cxt)
 
 #define BAN_TTY "/dev/tty1"
 
-	debug("setting username to root");
-	cxt->username = xmalloc(10); /* XXX free, or better way to set it */
-	memset(cxt->username, 0, 10);
-	strcpy(cxt->username, "root");
-	debug("set username to root");
-
         cxt->tty_path   = xmalloc(strlen(BAN_TTY));
 	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
         cxt->tty_name   = cxt->tty_path + 3;
@@ -580,8 +573,6 @@ void prepare_init(struct ban_context *cxt)
 
 	init_environ(cxt);		/* init $HOME, $TERM ... */
 
-	//setproctitle(PRG_NAME, cxt.username);
-
 	log_syslog(cxt);
 
 	motd();
@@ -643,17 +634,7 @@ void login_now(struct ban_context *cxt, int argc, char **argv)
 	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
 	debug("logs opened\n");
 
-	cxt->pwd = xgetpwnam(cxt->username, &cxt->pwdbuf);
-	if (!cxt->pwd) {
-		warnx(_("\nSession setup problem, abort."));
-		syslog(LOG_ERR, _("Invalid user name \"%s\" in %s:%d. Abort."),
-			   cxt->username, __FUNCTION__, __LINE__);
-		sleepexit(EXIT_FAILURE);
-	}
-
 	pwd = cxt->pwd;
-	//cxt.username = pwd->pw_name;
-	debug("set username cxt.username\n");
 
 	setgroups(0, NULL);/* root */
 	endpwent();
