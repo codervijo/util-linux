@@ -1049,10 +1049,6 @@ int main(int argc, char **argv)
 	sigprocmask(SIG_UNBLOCK, &set, NULL);
 	sigaction(SIGHUP, &sa_hup, NULL);
 
-	if (cxt.flags & F_VCONSOLE)
-		fcntl(STDOUT_FILENO, F_SETFL,
-			  fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
-
 	INIT_CHARDATA(&chardata);
 
 	sigaction(SIGQUIT, &sa_quit, NULL);
