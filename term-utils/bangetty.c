@@ -35,7 +35,6 @@
 #include "all-io.h"
 #include "ttyutils.h"
 #include "env.h"
-//#include "setproctitle.h"
 #include "xalloc.h"
 #include "pwdutils.h"
 
@@ -194,7 +193,6 @@ int run_ui_loop(ban_ui_t *lui)
 	while (stop != 1)
 	{
                 ch = wgetch(lui->bodywin);
-		//mvwprintw(lui->bodywin, 1, 1, "Got ch %x", ch);
 		switch (ch) {
                 case 'q':
                 case 'Q':
@@ -358,7 +356,6 @@ static void init_tty(struct ban_context *cxt)
 	debug("calling termio_init\n");
 	termio_init(cxt, &tt);
 
-
 	/* restore tty modes */
 	tcsetattr(0, TCSAFLUSH, &tt);
 }
@@ -485,12 +482,6 @@ static void fork_session(void)
 	if (got_sig)
 		exit(EXIT_FAILURE);
 
-	/*
-	 * Problem: if the user's shell is a shell like ash that doesn't do
-	 * setsid() or setpgrp(), then a ctrl-\, sending SIGQUIT to every
-	 * process in the pgrp, will kill us.
-	 */
-
 	/* start new session */
 	setsid();
 
@@ -548,9 +539,7 @@ void prepare_init(struct ban_context *cxt)
 	tcsetpgrp(STDIN_FILENO, getpid());
 
 	init_tty(cxt);
-
 	chown_tty(cxt);
-
 	pwd = cxt->pwd;
 	if (setgid(pwd->pw_gid) < 0 && pwd->pw_gid) {
 		syslog(LOG_ALERT, _("setgid() failed"));
@@ -561,9 +550,7 @@ void prepare_init(struct ban_context *cxt)
 		pwd->pw_shell = _PATH_BSHELL;
 
 	init_environ(cxt);		/* init $HOME, $TERM ... */
-
 	log_syslog(cxt);
-
 	motd();
 
 }
@@ -610,7 +597,6 @@ void login_now(struct ban_context *cxt, int argc, char **argv)
 	debug("inside login_now");
 
 	setpriority(PRIO_PROCESS, 0, 0);
-	//initproctitle(argc, argv);
 
 #if 0
 	for (int cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
@@ -993,7 +979,6 @@ int main(int argc, char **argv)
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
 
-	/* In case vhangup(2) has to called */
 	sa.sa_handler = SIG_IGN;
 	sa.sa_flags = SA_RESTART;
 	sigemptyset (&sa.sa_mask);
