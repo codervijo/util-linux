@@ -227,15 +227,6 @@ int teardown_first_screen(ban_ui_t *lui)
 	return 0;
 }
 
-/*int main()
-{
-	ban_ui_t *lui;
-
-	lui = setup_first_screen();
-	run_ui_loop(lui);
-	teardown_first_screen(lui);
-}*/
-
 /*
  * This bounds the time given to login.  Not a define, so it can
  * be patched on machines where it's too small.
