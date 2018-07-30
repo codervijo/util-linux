@@ -964,7 +964,6 @@ void debug_init(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-	struct chardata chardata;		/* will be set by get_logname() */
 	struct ban_context cxt = {
 		.tty    = "/dev/tty1",		/* default tty line */
 		.tty_mode = TTY_MODE,		  /* tty chmod() */
@@ -1003,9 +1002,6 @@ int main(int argc, char **argv)
 	sigaddset(&set, SIGHUP);
 	sigprocmask(SIG_UNBLOCK, &set, NULL);
 	sigaction(SIGHUP, &sa_hup, NULL);
-
-	INIT_CHARDATA(&chardata);
-
 	sigaction(SIGQUIT, &sa_quit, NULL);
 	sigaction(SIGINT, &sa_int, NULL);
 
