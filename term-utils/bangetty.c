@@ -74,14 +74,14 @@
  * Main control struct
  */
 struct ban_context {
-	char	        *tty_path;	   /* ttyname() return value */
-	mode_t		tty_mode;	   /* chmod() mode */
-	struct passwd   *pwd;	           /* user info */
-	char	        *pwdbuf;	   /* pwd strings */
+	char	       *tty_path;  /* ttyname() return value */
+	mode_t		tty_mode;  /* chmod() mode */
+	struct passwd  *pwd;	   /* user info */
+	char	       *pwdbuf;	   /* pwd strings */
 	pid_t	        pid;
-	int             flags;	  	   /* toggle switches, see below */
-	int             startsh;           /* Spawn shell */
-	char            *tty;		   /* name of tty */
+	int             flags;	   /* toggle switches, see below */
+	int             startsh;   /* Spawn shell */
+	char           *tty;	   /* name of tty */
 };
 
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
