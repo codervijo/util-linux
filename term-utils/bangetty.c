@@ -312,14 +312,10 @@ static void init_ban_ctx(struct ban_context *cxt)
 {
 	struct stat st;
 
-#define BAN_TTY "/dev/tty1"
-
-        cxt->tty_path   = xmalloc(strlen(BAN_TTY));
-	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
-	if (!cxt->tty_path || !*cxt->tty_path ||
-		lstat(cxt->tty_path, &st) != 0 || !S_ISCHR(st.st_mode) ||
-		(st.st_nlink > 1 && strncmp(cxt->tty_path, "/dev/", 5)) ||
-		access(cxt->tty_path, R_OK | W_OK) != 0) {
+	if (!cxt->tty || !*cxt->tty ||
+		lstat(cxt->tty, &st) != 0 || !S_ISCHR(st.st_mode) ||
+		(st.st_nlink > 1 && strncmp(cxt->tty, "/dev/", 5)) ||
+		access(cxt->tty, R_OK | W_OK) != 0) {
 
 		syslog(LOG_ERR, _("FATAL: bad tty"));
 		sleepexit(EXIT_FAILURE);
@@ -863,8 +859,6 @@ static void termio_clear(int fd)
 static void termio_init(struct ban_context *op, struct termios *tp)
 {
 	if (op->flags & F_VCONSOLE) {
-		setlocale(LC_CTYPE, "POSIX");
-		//op->flags &= ~F_UTF8; VIJO -> FIXME
 		reset_vc(op, tp);
 
 		termio_clear(STDOUT_FILENO);
@@ -975,6 +969,7 @@ int main(int argc, char **argv)
 	ban_ui_t *lui;
 
 	setlocale(LC_ALL, "");
+	setlocale(LC_CTYPE, "POSIX");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
 
