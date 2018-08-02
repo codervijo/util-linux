@@ -233,7 +233,6 @@ static volatile int got_sig = 0;
 
 /*
  * Let us delay all exit() calls when the user is not authenticated
- * or the session not fully initialized (loginpam_session()).
  */
 static void __attribute__ ((__noreturn__)) sleepexit(int eval)
 {
@@ -439,10 +438,6 @@ static void fork_session(void)
 
 	closelog();
 
-	/*
-	 * We must fork before setuid(), because we need to call
-	 * pam_close_session() as root.
-	 */
 	child_pid = fork();
 	if (child_pid < 0) {
 		warn(_("fork failed"));
@@ -457,7 +452,6 @@ static void fork_session(void)
 		close(0);
 		close(1);
 		close(2);
-		//free_getlogindefs_data();
 
 		sa.sa_handler = SIG_IGN;
 		sigaction(SIGQUIT, &sa, NULL);
@@ -798,11 +792,6 @@ static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
 			warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
 	}
 
-	/*
-	 * Standard input should already be connected to an open port. Make
-	 * sure it is open for read/write.
-	 */
-
 	if ((fcntl(STDIN_FILENO, F_GETFL, 0) & O_RDWR) != O_RDWR)
 		log_err(_("%s: not open for read/write"), tty);
 
@@ -905,11 +894,6 @@ static void __attribute__((__noreturn__)) usage(void)
 	exit(EXIT_SUCCESS);
 }
 
-/*
- * Helper function reports errors to console or syslog.
- * Will be used by log_err()  therefore
- * it takes a format as well as va_list.
- */
 static void exit_slowly(int code)
 {
 	/* Be kind to init(8). */
