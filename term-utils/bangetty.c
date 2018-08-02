@@ -73,7 +73,6 @@
  * Main control struct
  */
 struct ban_context {
-	char	       *tty_path;  /* ttyname() return value */
 	mode_t		tty_mode;  /* chmod() mode */
 	struct passwd  *pwd;	   /* user info */
 	char	       *pwdbuf;	   /* pwd strings */
@@ -335,7 +334,7 @@ static void init_tty(struct ban_context *cxt)
 
 	if ((fchown(0, 0, 0) || fchmod(0, cxt->tty_mode)) && errno != EROFS) {
 		syslog(LOG_ERR, _("FATAL: %s: change permissions failed: %m"),
-				cxt->tty_path);
+				cxt->tty);
 		sleepexit(EXIT_FAILURE);
 	}
 
