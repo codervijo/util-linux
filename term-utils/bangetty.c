@@ -17,7 +17,6 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <fcntl.h>
-#include <stdarg.h>
 #include <ctype.h>
 #include <utmpx.h>
 #include <getopt.h>
@@ -25,9 +24,9 @@
 #include <pwd.h>
 #include <grp.h>
 #include <pathnames.h>
-#include <sys/utsname.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/sendfile.h>
 #include <form.h>
 #include <assert.h>
 
@@ -38,9 +37,6 @@
 #include "xalloc.h"
 #include "pwdutils.h"
 
-#ifdef HAVE_SYS_PARAM_H
-# include <sys/param.h>
-#endif
 #include <syslog.h>
 #include <lastlog.h>
 
@@ -54,7 +50,6 @@
 #  endif
 #endif
 
-#include <sys/sendfile.h>
 
 #define SYSV_STYLE
 #define DEBUGGING 1
