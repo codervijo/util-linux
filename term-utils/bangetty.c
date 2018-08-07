@@ -118,28 +118,41 @@ int  teardown_first_screen(ban_ui_t *lui);
 void login_now(struct ban_context *cxt, int argc, char **argv);
 void prepare_init(struct ban_context *cxt);
 void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **argv);
+void disable_printk(void);
 inline void print_message(ban_ui_t *lui);
 static inline void setup_stdin(char *tty);
 
 inline void print_message(ban_ui_t *lui)
 {
-        wattron(lui->bodywin, A_BOLD);
-        wattron(lui->bodywin, COLOR_PAIR(2));
-        mvwprintw(lui->bodywin, LINES/2-2, COLS/2-20, "Please press ");
-        wattron(lui->bodywin, COLOR_PAIR(3));
-        wattron(lui->bodywin, A_STANDOUT);
-        wprintw(lui->bodywin, "Enter");
-        wattroff(lui->bodywin, A_STANDOUT);
-        wattron(lui->bodywin, COLOR_PAIR(2));
-        wprintw(lui->bodywin, " to start install.....");
+	wattron(lui->bodywin, A_BOLD);
+	wattron(lui->bodywin, COLOR_PAIR(2));
+	mvwprintw(lui->bodywin, LINES/2-2, COLS/2-20, "Please press ");
+	wattron(lui->bodywin, COLOR_PAIR(3));
+	wattron(lui->bodywin, A_STANDOUT);
+	wprintw(lui->bodywin, "Enter");
+	wattroff(lui->bodywin, A_STANDOUT);
+	wattron(lui->bodywin, COLOR_PAIR(2));
+	wprintw(lui->bodywin, " to start install.....");
+}
+
+void disable_printk(void)
+{
+int  fd;
+	char dbuf[256];
+
+	fd = open("/proc/sys/kernel/printk", O_WRONLY);
+	sprintf(dbuf, "0 0 0 0");
+	write(fd, dbuf, strlen(dbuf));
+	close(fd);
 }
 
 ban_ui_t *setup_first_screen(struct ban_context *cxt)
 {
 	ban_ui_t *lui;
-        struct  termios termios;
+	struct  termios termios;
 
 	open_tty(cxt->tty, &termios, cxt);
+	disable_printk();
 	/* Initialize curses */
 	initscr();
 	start_color();
@@ -154,22 +167,22 @@ ban_ui_t *setup_first_screen(struct ban_context *cxt)
 	lui   = xmalloc(sizeof(ban_ui_t));
 	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
 	assert(lui->bodywin != NULL);
-        wbkgd(lui->bodywin, COLOR_PAIR(1));
+	wbkgd(lui->bodywin, COLOR_PAIR(1));
 
-        /* Create a border with some margin around the main window */
-        lui->borderwin = derwin(lui->bodywin, DEFAULT_WIN_HEIGHT-10, DEFAULT_WIN_WIDTH-20, 5, 10);
-        assert(lui->borderwin != NULL);
-        wattron(lui->borderwin, A_BOLD);
-        box(lui->borderwin, 0, 0);
+	/* Create a border with some margin around the main window */
+	lui->borderwin = derwin(lui->bodywin, DEFAULT_WIN_HEIGHT-10, DEFAULT_WIN_WIDTH-20, 5, 10);
+	assert(lui->borderwin != NULL);
+	wattron(lui->borderwin, A_BOLD);
+	box(lui->borderwin, 0, 0);
 
-        print_message(lui);
- 
+	print_message(lui);
+
 	keypad(stdscr, TRUE);
-        keypad(lui->bodywin, TRUE);
+	keypad(lui->bodywin, TRUE);
 
-        refresh();
+	refresh();
 	wrefresh(lui->bodywin);
-        wrefresh(lui->borderwin);
+	wrefresh(lui->borderwin);
 
 	return lui;
 }
@@ -181,31 +194,31 @@ int run_ui_loop(ban_ui_t *lui)
 	int stop = 0;
 
 	curs_set(1);
-        wmove(lui->bodywin, LINES/2-2, COLS/2-20+13); /* Move cursor under 'E' of 'Enter' */
-        nodelay(lui->bodywin, FALSE);
-        
+	wmove(lui->bodywin, LINES/2-2, COLS/2-20+13); /* Move cursor under 'E' of 'Enter' */
+	nodelay(lui->bodywin, FALSE);
+
 	while (stop != 1)
 	{
-                ch = wgetch(lui->bodywin);
+		ch = wgetch(lui->bodywin);
 		switch (ch) {
-                case 'q':
-                case 'Q':
-                case 27:
-                        debug("Escaping to shell\n");
-                        stop = 1;
-                        ret = 1;
-                        break;
+		case 'q':
+		case 'Q':
+		case 27:
+			debug("Escaping to shell\n");
+			stop = 1;
+			ret = 1;
+			break;
 		case 10:
-	                debug("Should exit now, trying...\n");
+			debug("Should exit now, trying...\n");
 			stop = 1;
 			break;
-                default:
-                        mvwprintw(lui->bodywin,4, 9, "Key %x is pressed", ch);
+		default:
+			mvwprintw(lui->bodywin,4, 9, "Key %x is pressed", ch);
 		}
 		wrefresh(lui->bodywin);
 	}
 	debug("Returning from ui_loop\n");
-        return ret;
+	return ret;
 }
 
 int teardown_first_screen(ban_ui_t *lui)
