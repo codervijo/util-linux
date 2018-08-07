@@ -219,19 +219,24 @@ int teardown_first_screen(ban_ui_t *lui)
 	return 0;
 }
 
-/*
- * This bounds the time given to login.  Not a define, so it can
- * be patched on machines where it's too small.
- */
 static int child_pid = 0;
 static volatile int got_sig = 0;
+
+static void sig_handler(int signal)
+{
+	if (child_pid)
+		kill(-child_pid, signal);
+	else
+		got_sig = 1;
+	if (signal == SIGTERM)
+		kill(-child_pid, SIGHUP);	/* because the shell often ignores SIGTERM */
+}
 
 /*
  * Let us delay all exit() calls when the user is not authenticated
  */
 static void __attribute__ ((__noreturn__)) sleepexit(int eval)
 {
-	//sleep((unsigned int)getlogindefs_num("FAIL_DELAY", LOGIN_EXIT_TIMEOUT));
 	sleep(10);
 	exit(eval);
 }
@@ -256,7 +261,7 @@ static void motd(void)
 	motdlist = xstrdup(mb);
 
 	for (motdfile = strtok(motdlist, ":"); motdfile;
-		 motdfile = strtok(NULL, ":")) {
+		motdfile = strtok(NULL, ":")) {
 
 		struct stat st;
 		int fd;
@@ -430,6 +435,9 @@ static void fork_session(void)
 	 * The child calls setsid() that detaches from the tty as well.
 	 */
 	ioctl(0, TIOCNOTTY, NULL);
+	sa.sa_handler = sig_handler;
+	sigaction(SIGHUP, &sa, NULL);
+	sigaction(SIGTERM, &sa, &oldsa_term);
 
 	closelog();
 
@@ -589,9 +597,6 @@ void login_now(struct ban_context *cxt, int argc, char **argv)
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
 	debug("after setpgrp\n");
-
-	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
-	debug("logs opened\n");
 
 	pwd = cxt->pwd;
 
