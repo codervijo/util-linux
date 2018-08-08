@@ -119,7 +119,7 @@ void login_now(struct ban_context *cxt, int argc, char **argv);
 void prepare_init(struct ban_context *cxt);
 void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **argv);
 void disable_printk(void);
-inline void print_message(ban_ui_t *lui);
+static inline void print_message(ban_ui_t *lui);
 static inline void setup_stdin(char *tty);
 
 inline void print_message(ban_ui_t *lui)
@@ -137,7 +137,7 @@ inline void print_message(ban_ui_t *lui)
 
 void disable_printk(void)
 {
-int  fd;
+	int  fd;
 	char dbuf[256];
 
 	fd = open("/proc/sys/kernel/printk", O_WRONLY);
@@ -201,8 +201,8 @@ int run_ui_loop(ban_ui_t *lui)
 	{
 		ch = wgetch(lui->bodywin);
 		switch (ch) {
-		case 'q':
-		case 'Q':
+		case 'q': /* FALLTHROUGH */
+		case 'Q': /* FALLTHROUGH */
 		case 27:
 			debug("Escaping to shell\n");
 			stop = 1;
@@ -223,6 +223,7 @@ int run_ui_loop(ban_ui_t *lui)
 
 int teardown_first_screen(ban_ui_t *lui)
 {
+	delwin(lui->borderwin);
 	delwin(lui->bodywin);
 
 	/* remove menus and also free lui */
@@ -639,26 +640,6 @@ void login_now(struct ban_context *cxt, int argc, char **argv)
 	exit(EXIT_SUCCESS);
 }
 
-static void output_version(void)
-{
-	static const char *features[] = {
-#ifdef DEBUGGING
-		"debug",
-#endif
-		NULL
-	};
-	unsigned int i;
-
-	printf( _("%s from %s"), program_invocation_short_name, PACKAGE_STRING);
-	fputs(" (", stdout);
-	for (i = 0; features[i]; i++) {
-		if (0 < i)
-			fputs(", ", stdout);
-		printf("%s", features[i]);
-	}
-	fputs(")\n", stdout);
-}
-
 /* Parse command-line arguments. */
 static void parse_args(int argc, char **argv)
 {
@@ -669,19 +650,16 @@ static void parse_args(int argc, char **argv)
 		HELP_OPTION,
 	};
 	const struct option longopts[] = {
-		{  "version",	     no_argument,	     NULL,  'v'  },
+		{  "version",	  	 no_argument,	     NULL,  'v'  },
 		{  "help",	         no_argument,	     NULL,  'h'  },
 		{ NULL, 0, NULL, 0 }
 	};
 
-	while ((c = getopt_long(argc, argv,
-			   "hv", longopts,
-				NULL)) != -1) {
+	while ((c = getopt_long(argc, argv,  "hv", longopts, NULL)) != -1) {
 		switch (c) {
 		case 'v':
-			output_version();
-			exit(EXIT_SUCCESS);
 		case 'h':
+                case '?':
 			usage();
 		default:
 			errtryhelp(EXIT_FAILURE);
@@ -894,11 +872,7 @@ static void __attribute__((__noreturn__)) usage(void)
 	FILE *out = stdout;
 
 	fputs(USAGE_HEADER, out);
-	fprintf(out, _(" %1$s [options] <line> [<baud_rate>,...] [<termtype>]\n"
-			   " %1$s [options] <baud_rate>,... <line> [<termtype>]\n"), program_invocation_short_name);
-
-	fputs(USAGE_SEPARATOR, out);
-	fputs(_("Open a terminal and set its mode.\n"), out);
+	fprintf(out, _(" %1$s <Script to start> \n"), program_invocation_short_name);
 
 	fputs(USAGE_OPTIONS, out);
 
