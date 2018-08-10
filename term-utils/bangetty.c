@@ -876,8 +876,6 @@ static void __attribute__((__noreturn__)) usage(void)
 
 	fputs(USAGE_OPTIONS, out);
 
-	printf(USAGE_MAN_TAIL("bangetty(8)"));
-
 	exit(EXIT_SUCCESS);
 }
 
