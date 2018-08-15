@@ -1,6 +1,7 @@
 /*
  * Based on Alternate Getty (agetty) 'agetty' is a versatile, portable, easy to use
- * replacement for getty. This adds ncurses to agetty.
+ * replacement for getty. This adds a way run install scripts without explicit login.
+ * NOT TO BE used as regular Getty.
  *
  * This program is freely distributable.
  */
@@ -154,7 +155,10 @@ ban_ui_t *setup_first_screen(struct ban_context *cxt)
 	open_tty(cxt->tty, &termios, cxt);
 	disable_printk();
 	/* Initialize curses */
-	initscr();
+	if (initscr() == NULL) {
+		printf("Failed to start curses\n");
+		log_err("Curses failed to start");
+	}
 	start_color();
 	//cbreak();
 	curs_set(0);
@@ -932,21 +936,12 @@ int main(int argc, char **argv)
 		.pid = getpid(),		  /* PID */
                 .startsh = 0,
 	};
-	struct sigaction sa, sa_hup, sa_quit, sa_int;
-	sigset_t set;
 	ban_ui_t *lui;
 
 	setlocale(LC_ALL, "");
 	setlocale(LC_CTYPE, "POSIX");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-
-	sa.sa_handler = SIG_IGN;
-	sa.sa_flags = SA_RESTART;
-	sigemptyset (&sa.sa_mask);
-	sigaction(SIGHUP, &sa, &sa_hup);
-	sigaction(SIGQUIT, &sa, &sa_quit);
-	sigaction(SIGINT, &sa, &sa_int);
 
 #ifdef DEBUGGING
 	debug_init(argc, argv);
@@ -960,14 +955,6 @@ int main(int argc, char **argv)
 	/* Update the utmp file before login */
 	update_utmp(&cxt);
 
-	/* Unmask SIGHUP if inherited */
-	sigemptyset(&set);
-	sigaddset(&set, SIGHUP);
-	sigprocmask(SIG_UNBLOCK, &set, NULL);
-	sigaction(SIGHUP, &sa_hup, NULL);
-	sigaction(SIGQUIT, &sa_quit, NULL);
-	sigaction(SIGINT, &sa_int, NULL);
-
 	lui = setup_first_screen(&cxt);
 	cxt.startsh = run_ui_loop(lui);
 	teardown_first_screen(lui);
@@ -980,3 +967,10 @@ int main(int argc, char **argv)
 		log_err("write failed: %s", DEBUG_OUTPUT);
 #endif
 }
+
+/* 
+ * TODO
+ *  1 rename it as ingetty
+ *  2 remove TODO items
+ *  3 make sure signal handling makes sense
+ */
