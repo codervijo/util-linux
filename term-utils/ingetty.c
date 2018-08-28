@@ -63,12 +63,12 @@
 
 #define	TTYGRPNAME	     	"tty"	/* name of group to own ttys */
 #define VCS_PATH_MAX		  64
-#define PRG_NAME           "bangetty"
+#define PRG_NAME           "ingetty"
 
 /*
  * Main control struct
  */
-struct ban_context {
+struct in_context {
 	mode_t		tty_mode;  /* chmod() mode */
 	struct passwd  *pwd;	   /* user info */
 	char	       *pwdbuf;	   /* pwd strings */
@@ -82,10 +82,10 @@ struct ban_context {
 #define F_VCONSOLE	   (1<<12)	/* This is a virtual console */
 
 static void parse_args(int argc, char **argv);
-static void update_utmp(struct ban_context *op);
-static void open_tty(char *tty, struct termios *tp, struct ban_context *op);
-static void termio_init(struct ban_context *op, struct termios *tp);
-static void reset_vc (const struct ban_context *op, struct termios *tp);
+static void update_utmp(struct in_context *op);
+static void open_tty(char *tty, struct termios *tp, struct in_context *op);
+static void termio_init(struct in_context *op, struct termios *tp);
+static void reset_vc (const struct in_context *op, struct termios *tp);
 static void usage(void) __attribute__((__noreturn__));
 static void exit_slowly(int code) __attribute__((__noreturn__));
 static void log_err(const char *, ...) __attribute__((__noreturn__))
@@ -108,22 +108,22 @@ void debug_init(int argc, char **argv);
 #define DEFAULT_WINDOW_START_ROW      0
 #define DEFAULT_WINDOW_START_COL      0
 
-typedef struct ban_ui_s {
+typedef struct in_ui_s {
 	WINDOW  *bodywin;
         WINDOW  *borderwin;
-} ban_ui_t;
+} in_ui_t;
 
-ban_ui_t *setup_first_screen(struct ban_context *cxt);
-int  run_ui_loop(ban_ui_t *lui);
-int  teardown_first_screen(ban_ui_t *lui);
-void login_now(struct ban_context *cxt, int argc, char **argv);
-void prepare_init(struct ban_context *cxt);
-void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **argv);
+in_ui_t *setup_first_screen(struct in_context *cxt);
+int  run_ui_loop(in_ui_t *lui);
+int  teardown_first_screen(in_ui_t *lui);
+void login_now(struct in_context *cxt, int argc, char **argv);
+void prepare_init(struct in_context *cxt);
+void spawn_child(struct in_context *cxt, struct passwd *pwd, int argc, char **argv);
 void disable_printk(void);
-static inline void print_message(ban_ui_t *lui);
+static inline void print_message(in_ui_t *lui);
 static inline void setup_stdin(char *tty);
 
-inline void print_message(ban_ui_t *lui)
+inline void print_message(in_ui_t *lui)
 {
 	wattron(lui->bodywin, A_BOLD);
 	wattron(lui->bodywin, COLOR_PAIR(2));
@@ -147,9 +147,9 @@ void disable_printk(void)
 	close(fd);
 }
 
-ban_ui_t *setup_first_screen(struct ban_context *cxt)
+in_ui_t *setup_first_screen(struct in_context *cxt)
 {
-	ban_ui_t *lui;
+	in_ui_t *lui;
 	struct  termios termios;
 
 	open_tty(cxt->tty, &termios, cxt);
@@ -168,7 +168,7 @@ ban_ui_t *setup_first_screen(struct ban_context *cxt)
 	init_pair(2, COLOR_YELLOW, COLOR_BLUE);  /* Text to make it obvious */
         init_pair(3, COLOR_WHITE,  COLOR_YELLOW);
 
-	lui   = xmalloc(sizeof(ban_ui_t));
+	lui   = xmalloc(sizeof(in_ui_t));
 	lui->bodywin = newwin(DEFAULT_WIN_HEIGHT, DEFAULT_WIN_WIDTH, DEFAULT_WINDOW_START_ROW, DEFAULT_WINDOW_START_COL);
 	assert(lui->bodywin != NULL);
 	wbkgd(lui->bodywin, COLOR_PAIR(1));
@@ -192,7 +192,7 @@ ban_ui_t *setup_first_screen(struct ban_context *cxt)
 }
 
 /*  returns 1 to spawn shell, 0 to execute argv[1] */
-int run_ui_loop(ban_ui_t *lui)
+int run_ui_loop(in_ui_t *lui)
 {
 	int ch, ret = 0;
 	int stop = 0;
@@ -225,7 +225,7 @@ int run_ui_loop(ban_ui_t *lui)
 	return ret;
 }
 
-int teardown_first_screen(ban_ui_t *lui)
+int teardown_first_screen(in_ui_t *lui)
 {
 	delwin(lui->borderwin);
 	delwin(lui->bodywin);
@@ -302,7 +302,7 @@ static void motd(void)
 #define chmod_err(_what, _mode) \
 		syslog(LOG_ERR, _("chmod (%s, %u) failed: %m"), (_what), (_mode))
 
-static void chown_tty(struct ban_context *cxt)
+static void chown_tty(struct in_context *cxt)
 {
 	const char *grname, *gidstr;
 	uid_t uid = cxt->pwd->pw_uid;
@@ -324,7 +324,7 @@ static void chown_tty(struct ban_context *cxt)
 		chmod_err(cxt->tty, cxt->tty_mode);
 }
 
-static void init_ban_ctx(struct ban_context *cxt)
+static void init_in_ctx(struct in_context *cxt)
 {
 	struct stat st;
 
@@ -341,7 +341,7 @@ static void init_ban_ctx(struct ban_context *cxt)
 /*
  * Reads the current terminal path and initializes cxt->tty_* variables.
  */
-static void init_tty(struct ban_context *cxt)
+static void init_tty(struct in_context *cxt)
 {
 	struct termios tt, ttt;
 
@@ -372,7 +372,7 @@ static void init_tty(struct ban_context *cxt)
 	tcsetattr(0, TCSAFLUSH, &tt);
 }
 
-static void log_lastlog(struct ban_context *cxt)
+static void log_lastlog(struct in_context *cxt)
 {
 	struct sigaction sa, oldsa_xfsz;
 	struct lastlog ll;
@@ -411,7 +411,7 @@ done:
 	sigaction(SIGXFSZ, &oldsa_xfsz, NULL);		/* restore original setting */
 }
 
-static void log_syslog(struct ban_context *cxt)
+static void log_syslog(struct in_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
 
@@ -509,7 +509,7 @@ static void fork_session(void)
 /*
  * Initialize $TERM, $HOME, ...
  */
-static void init_environ(struct ban_context *cxt)
+static void init_environ(struct in_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
 	char *termenv;
@@ -542,7 +542,7 @@ static void init_environ(struct ban_context *cxt)
 	xsetenv("LOGNAME", pwd->pw_name, 1);
 }
 
-void prepare_init(struct ban_context *cxt)
+void prepare_init(struct in_context *cxt)
 {
 	struct passwd *pwd;
 
@@ -565,7 +565,7 @@ void prepare_init(struct ban_context *cxt)
 
 }
 
-void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **argv)
+void spawn_child(struct in_context *cxt, struct passwd *pwd, int argc, char **argv)
 {
 	int childArgc = 0;
 	char *childArgv[10];
@@ -599,7 +599,7 @@ void spawn_child(struct ban_context *cxt, struct passwd *pwd, int argc, char **a
 
 }
 
-void login_now(struct ban_context *cxt, int argc, char **argv)
+void login_now(struct in_context *cxt, int argc, char **argv)
 {
 	struct passwd *pwd;
 
@@ -674,7 +674,7 @@ static void parse_args(int argc, char **argv)
 }
 
 /* Update our utmp entry. */
-static void update_utmp(struct ban_context *op)
+static void update_utmp(struct in_context *op)
 {
 	struct utmpx ut;
 	time_t t;
@@ -773,7 +773,7 @@ static inline void setup_stdin(char *tty)
 
 
 /* Set up tty as stdin, stdout & stderr. */
-static void open_tty(char *tty, struct termios *tp, struct ban_context *op)
+static void open_tty(char *tty, struct termios *tp, struct in_context *op)
 {
 	const pid_t pid = getpid();
         int serial;
@@ -839,7 +839,7 @@ static void termio_clear(int fd)
 }
 
 /* Initialize termios settings. */
-static void termio_init(struct ban_context *op, struct termios *tp)
+static void termio_init(struct in_context *op, struct termios *tp)
 {
 	if (op->flags & F_VCONSOLE) {
 		reset_vc(op, tp);
@@ -853,7 +853,7 @@ static void termio_init(struct ban_context *op, struct termios *tp)
 }
 
 /* Reset virtual console on stdin to its defaults */
-static void reset_vc(const struct ban_context *op, struct termios *tp)
+static void reset_vc(const struct in_context *op, struct termios *tp)
 {
 	int fl = 0;
 
@@ -930,13 +930,13 @@ void debug_init(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-	struct ban_context cxt = {
+	struct in_context cxt = {
 		.tty    = "/dev/tty1",		/* default tty line */
 		.tty_mode = TTY_MODE,		  /* tty chmod() */
 		.pid = getpid(),		  /* PID */
                 .startsh = 0,
 	};
-	ban_ui_t *lui;
+	in_ui_t *lui;
 
 	setlocale(LC_ALL, "");
 	setlocale(LC_CTYPE, "POSIX");
@@ -950,7 +950,7 @@ int main(int argc, char **argv)
 	/* Parse command-line arguments. */
 	parse_args(argc, argv);
 
-        init_ban_ctx(&cxt);
+        init_in_ctx(&cxt);
 
 	/* Update the utmp file before login */
 	update_utmp(&cxt);
@@ -968,9 +968,3 @@ int main(int argc, char **argv)
 #endif
 }
 
-/* 
- * TODO
- *  1 rename it as ingetty
- *  2 remove TODO items
- *  3 make sure signal handling makes sense
- */

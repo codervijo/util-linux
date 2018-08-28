@@ -43,10 +43,10 @@ ngetty_LDADD = $(LDADD) libcommon.la -lform -lncurses -lmenu -lpam -lpam_misc
 endif # BUILD_NGETTY
 
 if BUILD_BANGETTY
-sbin_PROGRAMS += bangetty
+sbin_PROGRAMS += ingetty
 #dist_man_MANS += term-utils/agetty.8
-bangetty_SOURCES = term-utils/bangetty.c
-bangetty_LDADD = $(LDADD) libcommon.la -lform -lncurses -lmenu -lpam -lpam_misc
+ingetty_SOURCES = term-utils/ingetty.c
+ingetty_LDADD = $(LDADD) libcommon.la -lform -lncurses -lmenu -lpam -lpam_misc
 endif # BUILD_BANGETTY
 
 
