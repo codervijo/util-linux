@@ -615,7 +615,11 @@ void login_now(struct in_context *cxt, int argc, char **argv)
 
 	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
 	debug("after setpgrp\n");
-
+        cxt->pwd = xgetpwnam("root", cxt->pwdbuf);
+        if (!cxt->pwd) {
+            debug("TODO failed to get pwd\n");
+            sleepexit(EXIT_FAILURE);
+        }
 	pwd = cxt->pwd;
 
 	setgroups(0, NULL);/* root */
