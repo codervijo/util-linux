@@ -217,7 +217,7 @@ int run_ui_loop(in_ui_t *lui)
 			stop = 1;
 			break;
 		default:
-			mvwprintw(lui->bodywin,4, 9, "Key %x is pressed", ch);
+			//mvwprintw(lui->bodywin,4, 9, "Key %x is pressed", ch);
 		}
 		wrefresh(lui->bodywin);
 	}
@@ -617,7 +617,7 @@ void login_now(struct in_context *cxt, int argc, char **argv)
 	debug("after setpgrp\n");
         cxt->pwd = xgetpwnam("root", &cxt->pwdbuf);
         if (!cxt->pwd) {
-            debug("TODO failed to get pwd\n");
+            debug("Failed to get pwd\n");
             sleepexit(EXIT_FAILURE);
         }
 	pwd = cxt->pwd;
