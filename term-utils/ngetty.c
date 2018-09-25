@@ -1,6 +1,7 @@
 /*
  * Based on Alternate Getty (agetty) 'agetty' is a versatile, portable, easy to use
- * replacement for getty. This adds ncurses to agetty.
+ * replacement for getty. This adds a way run install scripts without explicit login.
+ * NOT TO BE used as regular Getty.
  *
  * This program is freely distributable.
  */
@@ -17,7 +18,6 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <fcntl.h>
-#include <stdarg.h>
 #include <ctype.h>
 #include <utmpx.h>
 #include <getopt.h>
@@ -25,23 +25,20 @@
 #include <pwd.h>
 #include <grp.h>
 #include <pathnames.h>
-#include <sys/utsname.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/sendfile.h>
 #include <form.h>
+#include <menu.h>
 #include <assert.h>
 
 #include "strutils.h"
 #include "all-io.h"
 #include "ttyutils.h"
 #include "env.h"
-//#include "setproctitle.h"
 #include "xalloc.h"
 #include "pwdutils.h"
 
-#ifdef HAVE_SYS_PARAM_H
-# include <sys/param.h>
-#endif
 #include <syslog.h>
 #include <lastlog.h>
 
@@ -55,21 +52,9 @@
 #  endif
 #endif
 
-#include <sys/sendfile.h>
 
 #define SYSV_STYLE
 #define DEBUGGING 1
-
-#ifdef DEBUGGING
-# include "closestream.h"
-# ifndef DEBUG_OUTPUT
-#  define DEBUG_OUTPUT "/dev/tty10"
-# endif
-# define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
-FILE *dbf;
-#else
-# define debug(s) do { ; } while (0)
-#endif
 
 #ifdef USE_TTY_GROUP
 # define TTY_MODE 0620
@@ -79,39 +64,33 @@ FILE *dbf;
 
 #define	TTYGRPNAME	     	"tty"	/* name of group to own ttys */
 #define VCS_PATH_MAX		  64
-#define PRG_NAME           "bangetty"
+#define PRG_NAME         "ngetty"
 
 /*
  * Main control struct
  */
-struct nlogin_context {
-	char	            *tty_path;	           /* ttyname() return value */
-	const char	    *tty_name;	           /* tty_path without /dev prefix */
-	const char	    *tty_number;	   /* end of the tty_path */
-	mode_t		     tty_mode;	           /* chmod() mode */
-	char		    *username;	           /* from command line or PAM */
-	struct passwd       *pwd;	           /* user info */
-	char		    *pwdbuf;	           /* pwd strings */
-	pid_t		     pid;
-	int                  flags;	  	   /* toggle switches, see below */
-	char                *tty;		   /* name of tty */
-	char                *term;	    	   /* terminal type */
+struct ng_context {
+	mode_t		    tty_mode;  /* chmod() mode */
+	struct passwd  *pwd;	   /* user info */
+	char	       *pwdbuf;	   /* pwd strings */
+	pid_t	        pid;
+	int             flags;	   /* toggle switches, see below */
+	int             startsh;   /* Spawn shell */
+	char           *tty;	   /* name of tty */
 };
 
 #define F_KEEPCFLAGS   (1<<10)	/* reuse c_cflags setup from kernel */
 #define F_VCONSOLE	   (1<<12)	/* This is a virtual console */
 
-static void parse_args(int argc, char **argv, struct nlogin_context *op);
-static void update_utmp(struct nlogin_context *op);
-static void open_tty(char *tty, struct termios *tp, struct nlogin_context *op);
-static void termio_init(struct nlogin_context *op, struct termios *tp);
-static void reset_vc (const struct nlogin_context *op, struct termios *tp);
+static void parse_args(int argc, char **argv);
+static void update_utmp(struct ng_context *op);
+static void open_tty(char *tty, struct termios *tp, struct ng_context *op);
+static void termio_init(struct ng_context *op, struct termios *tp);
+static void reset_vc (const struct ng_context *op, struct termios *tp);
 static void usage(void) __attribute__((__noreturn__));
 static void exit_slowly(int code) __attribute__((__noreturn__));
 static void log_err(const char *, ...) __attribute__((__noreturn__))
 				   __attribute__((__format__(printf, 1, 2)));
-static void log_warn (const char *, ...)
-				__attribute__((__format__(printf, 1, 2)));
 
 #ifdef DEBUGGING
 # include "closestream.h"
@@ -120,17 +99,10 @@ static void log_warn (const char *, ...)
 # endif
 # define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
 FILE *dbf;
+void debug_init(int argc, char **argv);
 #else
 # define debug(s) do { ; } while (0)
 #endif
-
-#include <form.h>
-#include <menu.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <unistd.h>
-#include <ctype.h>
 
 #define NUM_FIELDS                                      3
 #define NUM_ITEMS                                       3
@@ -179,20 +151,37 @@ typedef struct login_ui_s {
     WINDOW  *menuwin;
 } login_ui_t;
 
-login_ui_t *setup_login_screen(void);
+login_ui_t *setup_login_screen(struct ng_context *cxt);
 static char *trim_input(char *input);
 int button_handle(login_ui_t *lui, ITEM *item);
 void run_login_loop(login_ui_t *lui);
 int teardown_login_screen(login_ui_t *lui);
-void login_now(int argc, char **argv);
+void login_now(struct ng_context *cxt, int argc, char **argv);
 
-login_ui_t *setup_login_screen(void)
+void disable_printk(void)
+{
+    int  fd;
+    char dbuf[256];
+
+    fd = open("/proc/sys/kernel/printk", O_WRONLY);
+    sprintf(dbuf, "0 0 0 0");
+    write(fd, dbuf, strlen(dbuf));
+    close(fd);
+}
+
+login_ui_t *setup_login_screen(struct ng_context *cxt)
 {
     login_ui_t *lui;
+    struct  termios termios;
     //WINDOW *tmpw1;
 
+    open_tty(cxt->tty, &termios, cxt);
+    disable_printk();
     /* Initialize curses */
-    initscr();
+    if (initscr() == NULL) {
+        printf("Failed to start curses\n");
+        log_err("Curses failed to start");
+    }
     start_color();
     cbreak();
     curs_set(0);
@@ -457,30 +446,24 @@ int teardown_login_screen(login_ui_t *lui)
     return 0;
 }
 
-/*int main()
-{
-    login_ui_t *lui;
-
-    lui = setup_login_screen();
-    run_login_loop(lui);
-    teardown_login_screen(lui);
-}*/
-
-
-/*
- * This bounds the time given to login.  Not a define, so it can
- * be patched on machines where it's too small.
- */
 static int child_pid = 0;
 static volatile int got_sig = 0;
 
+static void sig_handler(int signal)
+{
+	if (child_pid)
+		kill(-child_pid, signal);
+	else
+		got_sig = 1;
+	if (signal == SIGTERM)
+		kill(-child_pid, SIGHUP);	/* because the shell often ignores SIGTERM */
+}
+
 /*
  * Let us delay all exit() calls when the user is not authenticated
- * or the session not fully initialized (loginpam_session()).
  */
 static void __attribute__ ((__noreturn__)) sleepexit(int eval)
 {
-	//sleep((unsigned int)getlogindefs_num("FAIL_DELAY", LOGIN_EXIT_TIMEOUT));
 	sleep(10);
 	exit(eval);
 }
@@ -505,7 +488,7 @@ static void motd(void)
 	motdlist = xstrdup(mb);
 
 	for (motdfile = strtok(motdlist, ":"); motdfile;
-		 motdfile = strtok(NULL, ":")) {
+		motdfile = strtok(NULL, ":")) {
 
 		struct stat st;
 		int fd;
@@ -528,7 +511,7 @@ static void motd(void)
 #define chmod_err(_what, _mode) \
 		syslog(LOG_ERR, _("chmod (%s, %u) failed: %m"), (_what), (_mode))
 
-static void chown_tty(struct nlogin_context *cxt)
+static void chown_tty(struct ng_context *cxt)
 {
 	const char *grname, *gidstr;
 	uid_t uid = cxt->pwd->pw_uid;
@@ -545,41 +528,31 @@ static void chown_tty(struct nlogin_context *cxt)
 		}
 	}
 	if (fchown(0, uid, gid))				/* tty */
-		chown_err(cxt->tty_name, uid, gid);
+		chown_err(cxt->tty, uid, gid);
 	if (fchmod(0, cxt->tty_mode))
-		chmod_err(cxt->tty_name, cxt->tty_mode);
+		chmod_err(cxt->tty, cxt->tty_mode);
+}
+
+static void init_in_ctx(struct ng_context *cxt)
+{
+	struct stat st;
+
+	if (!cxt->tty || !*cxt->tty ||
+		lstat(cxt->tty, &st) != 0 || !S_ISCHR(st.st_mode) ||
+		(st.st_nlink > 1 && strncmp(cxt->tty, "/dev/", 5)) ||
+		access(cxt->tty, R_OK | W_OK) != 0) {
+
+		syslog(LOG_ERR, _("FATAL: bad tty"));
+		sleepexit(EXIT_FAILURE);
+	}
 }
 
 /*
  * Reads the current terminal path and initializes cxt->tty_* variables.
  */
-static void init_tty(struct nlogin_context *cxt)
+static void init_tty(struct ng_context *cxt)
 {
-	struct stat st;
 	struct termios tt, ttt;
-#define BAN_TTY "/dev/tty1"
-
-        cxt->tty_path   = xmalloc(strlen(BAN_TTY));
-	xstrncpy(cxt->tty_path, BAN_TTY, sizeof(BAN_TTY));
-        cxt->tty_name   = cxt->tty_path + 3;
-        cxt->tty_number = cxt->tty_path + 8; 
-
-	/*
-	 * In case login is suid it was possible to use a hardlink as stdin
-	 * and exploit races for a local root exploit. (Wojciech Purczynski).
-	 *
-	 * More precisely, the problem is  ttyn := ttyname(0); ...; chown(ttyn);
-	 * here ttyname() might return "/tmp/x", a hardlink to a pseudotty.
-	 * All of this is a problem only when login is suid, which it isn't.
-	 */
-	if (!cxt->tty_path || !*cxt->tty_path ||
-		lstat(cxt->tty_path, &st) != 0 || !S_ISCHR(st.st_mode) ||
-		(st.st_nlink > 1 && strncmp(cxt->tty_path, "/dev/", 5)) ||
-		access(cxt->tty_path, R_OK | W_OK) != 0) {
-
-		syslog(LOG_ERR, _("FATAL: bad tty"));
-		sleepexit(EXIT_FAILURE);
-	}
 
 	tcgetattr(0, &tt);
 	ttt = tt;
@@ -587,7 +560,7 @@ static void init_tty(struct nlogin_context *cxt)
 
 	if ((fchown(0, 0, 0) || fchmod(0, cxt->tty_mode)) && errno != EROFS) {
 		syslog(LOG_ERR, _("FATAL: %s: change permissions failed: %m"),
-				cxt->tty_path);
+				cxt->tty);
 		sleepexit(EXIT_FAILURE);
 	}
 
@@ -595,13 +568,20 @@ static void init_tty(struct nlogin_context *cxt)
 	//tcsetattr(0, TCSANOW, &ttt);
 
 	/* open stdin,stdout,stderr to the tty */
-        //	open_tty(cxt->tty_path);
+	debug("calling open_tty\n");
+
+	/* Open the tty as standard { input, output, error }. */
+	open_tty(cxt->tty, &tt, cxt);
+
+	/* Initialize the termios settings (raw mode, eight-bit, blocking i/o). */
+	debug("calling termio_init\n");
+	termio_init(cxt, &tt);
 
 	/* restore tty modes */
 	tcsetattr(0, TCSAFLUSH, &tt);
 }
 
-static void log_lastlog(struct nlogin_context *cxt)
+static void log_lastlog(struct ng_context *cxt)
 {
 	struct sigaction sa, oldsa_xfsz;
 	struct lastlog ll;
@@ -628,8 +608,8 @@ static void log_lastlog(struct nlogin_context *cxt)
 	time(&t);
 	ll.ll_time = t;		/* ll_time is always 32bit */
 
-	if (cxt->tty_name)
-		xstrncpy(ll.ll_line, cxt->tty_name, sizeof(ll.ll_line));
+	if (cxt->tty)
+		xstrncpy(ll.ll_line, cxt->tty, sizeof(ll.ll_line));
 
 	if (write_all(fd, (char *)&ll, sizeof(ll)))
 		warn(_("write lastlog failed"));
@@ -640,22 +620,22 @@ done:
 	sigaction(SIGXFSZ, &oldsa_xfsz, NULL);		/* restore original setting */
 }
 
-static void log_syslog(struct nlogin_context *cxt)
+static void log_syslog(struct ng_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
 
-	if (!cxt->tty_name)
+	if (!cxt->tty)
 		return;
 
-	if (!strncmp(cxt->tty_name, "ttyS", 4))
+	if (!strncmp(cxt->tty, "/dev/ttyS", 4))
 		syslog(LOG_INFO, _("Unsupported DIALUP AT %s BY %s"),
-			   cxt->tty_name, pwd->pw_name);
+			   cxt->tty, pwd->pw_name);
 
 	if (!pwd->pw_uid) {
-		syslog(LOG_NOTICE, _("ROOT LOGIN ON %s"), cxt->tty_name);
+		syslog(LOG_NOTICE, _("ROOT LOGIN ON %s using BANGETTY!!"), cxt->tty);
 	} else {
 		syslog(LOG_NOTICE, _("NON-ROOT LOGIN ON %s using BANGETTY!!"),
-			   cxt->tty_name);
+			   cxt->tty);
 	}
 }
 
@@ -682,13 +662,12 @@ static void fork_session(void)
 	 * The child calls setsid() that detaches from the tty as well.
 	 */
 	ioctl(0, TIOCNOTTY, NULL);
+	sa.sa_handler = sig_handler;
+	sigaction(SIGHUP, &sa, NULL);
+	sigaction(SIGTERM, &sa, &oldsa_term);
 
 	closelog();
 
-	/*
-	 * We must fork before setuid(), because we need to call
-	 * pam_close_session() as root.
-	 */
 	child_pid = fork();
 	if (child_pid < 0) {
 		warn(_("fork failed"));
@@ -703,7 +682,6 @@ static void fork_session(void)
 		close(0);
 		close(1);
 		close(2);
-		//free_getlogindefs_data();
 
 		sa.sa_handler = SIG_IGN;
 		sigaction(SIGQUIT, &sa, NULL);
@@ -723,17 +701,10 @@ static void fork_session(void)
 	if (got_sig)
 		exit(EXIT_FAILURE);
 
-	/*
-	 * Problem: if the user's shell is a shell like ash that doesn't do
-	 * setsid() or setpgrp(), then a ctrl-\, sending SIGQUIT to every
-	 * process in the pgrp, will kill us.
-	 */
-
 	/* start new session */
 	setsid();
 
 	/* make sure we have a controlling tty */
-	//open_tty(cxt->tty_path);
 	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);	/* reopen */
 
 	/*
@@ -747,7 +718,7 @@ static void fork_session(void)
 /*
  * Initialize $TERM, $HOME, ...
  */
-static void init_environ(struct nlogin_context *cxt)
+static void init_environ(struct ng_context *cxt)
 {
 	struct passwd *pwd = cxt->pwd;
 	char *termenv;
@@ -780,67 +751,15 @@ static void init_environ(struct nlogin_context *cxt)
 	xsetenv("LOGNAME", pwd->pw_name, 1);
 }
 
-
-void login_now(int argc, char **argv)
+void prepare_init(struct ng_context *cxt)
 {
-	char *childArgv[10];
-	char *buff;
-	int childArgc = 0;
 	struct passwd *pwd;
 
-	struct nlogin_context cxt = {
-		.tty_mode = TTY_MODE,		  /* tty chmod() */
-		.pid = getpid(),		  /* PID */
-	};
+	tcsetpgrp(STDIN_FILENO, getpid());
 
-	debug("inside login_now");
-	signal(SIGQUIT, SIG_IGN);
-	signal(SIGINT, SIG_IGN);
-
-	setpriority(PRIO_PROCESS, 0, 0);
-	//initproctitle(argc, argv);
-
-	debug("setting username to root");
-	cxt.username = xmalloc(10); /* XXX free, or better way to set it */
-	memset(cxt.username, 0, 10);
-	strcpy(cxt.username, "root");
-	debug("set username to root");
-
-#if 0
-	for (cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
-		close(cnt);
-#endif
-	debug("before setpgrp");
-
-	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
-	debug("after setpgrp\n");
-	init_tty(&cxt);
-
-	debug("about to open logs\n");
-	openlog(PRG_NAME, LOG_ODELAY, LOG_AUTHPRIV);
-	debug("logs opened\n");
-
-	debug("before xgetpwnam\n");
-	cxt.pwd = xgetpwnam(cxt.username, &cxt.pwdbuf);
-	if (!cxt.pwd) {
-		warnx(_("\nSession setup problem, abort."));
-		syslog(LOG_ERR, _("Invalid user name \"%s\" in %s:%d. Abort."),
-			   cxt.username, __FUNCTION__, __LINE__);
-		sleepexit(EXIT_FAILURE);
-	}
-
-	pwd = cxt.pwd;
-	//cxt.username = pwd->pw_name;
-	debug("set username cxt.username\n");
-
-	setgroups(0, NULL);/* root */
-
-	endpwent();
-
-	log_lastlog(&cxt);
-
-	chown_tty(&cxt);
-
+	init_tty(cxt);
+	chown_tty(cxt);
+	pwd = cxt->pwd;
 	if (setgid(pwd->pw_gid) < 0 && pwd->pw_gid) {
 		syslog(LOG_ALERT, _("setgid() failed"));
 		exit(EXIT_FAILURE);
@@ -849,13 +768,74 @@ void login_now(int argc, char **argv)
 	if (pwd->pw_shell == NULL || *pwd->pw_shell == '\0')
 		pwd->pw_shell = _PATH_BSHELL;
 
-	init_environ(&cxt);		/* init $HOME, $TERM ... */
-
-	//setproctitle(PRG_NAME, cxt.username);
-
-	log_syslog(&cxt);
-
+	init_environ(cxt);		/* init $HOME, $TERM ... */
+	log_syslog(cxt);
 	motd();
+
+}
+
+void spawn_child(struct ng_context *cxt, struct passwd *pwd, int argc, char **argv)
+{
+	int childArgc = 0;
+	char *childArgv[10];
+	char *buff;
+
+	if (chdir(pwd->pw_dir) < 0) {
+		warn(_("%s: change directory failed"), pwd->pw_dir);
+
+		if (chdir("/"))
+			warn(_("%s: change directory failed"), "/");
+		pwd->pw_dir = "/";
+		printf(_("Logging in with home = \"/\".\n"));
+	}
+
+        childArgc              = 0;
+	childArgv[childArgc++] = "/bin/bash";
+	childArgv[childArgc++] = "-sh";
+	if (cxt->startsh == 0 && argc > 1) {
+		debug("handling argc\n");
+                printf("%d arguments are {%s}-{%s}\n", argc, argv[0], argv[1]);
+		buff = xmalloc(strlen(argv[1]) + 6);
+
+		strcpy(buff, "exec ");
+		strcat(buff, argv[1]);
+		childArgv[childArgc++] = "-c";
+		childArgv[childArgc++] = buff;
+	}
+        childArgv[childArgc++] = NULL;
+
+	execvp(childArgv[0], childArgv + 1);
+
+}
+
+void login_now(struct ng_context *cxt, int argc, char **argv)
+{
+	struct passwd *pwd;
+
+
+	debug("inside login_now");
+
+	setpriority(PRIO_PROCESS, 0, 0);
+
+#if 0
+	for (int cnt = get_fd_tabsize() - 1; cnt > 2; cnt--) 
+		close(cnt);
+#endif
+
+	setpgrp();	 /* set pgid to pid this means that setsid() will fail */
+	debug("after setpgrp\n");
+        cxt->pwd = xgetpwnam("root", &cxt->pwdbuf);
+        if (!cxt->pwd) {
+            debug("Failed to get pwd\n");
+            sleepexit(EXIT_FAILURE);
+        }
+	pwd = cxt->pwd;
+
+	setgroups(0, NULL);/* root */
+	endpwent();
+	log_lastlog(cxt);
+
+    prepare_init(cxt);
 
 	/*
 	 * Detach the controlling terminal, fork, and create a new session
@@ -870,59 +850,15 @@ void login_now(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	if (chdir(pwd->pw_dir) < 0) {
-		warn(_("%s: change directory failed"), pwd->pw_dir);
-
-		if (chdir("/"))
-			warn(_("%s: change directory failed"), "/");
-		pwd->pw_dir = "/";
-		printf(_("Logging in with home = \"/\".\n"));
-	}
-
-        childArgc              = 0;
-	childArgv[childArgc++] = "/bin/bash";
-	childArgv[childArgc++] = "-sh";
-	if ( argc > 1) {
-		debug("handling argc\n");
-                printf("%d arguments are {%s}-{%s}\n", argc, argv[0], argv[1]);
-		buff = xmalloc(strlen(argv[1]) + 6);
-
-		strcpy(buff, "exec ");
-		strcat(buff, argv[1]);
-		childArgv[childArgc++] = "-c";
-		childArgv[childArgc++] = buff;
-	}
-    childArgv[childArgc++] = NULL;
-
-	execvp(childArgv[0], childArgv + 1);
+    spawn_child(cxt, pwd, argc, argv);
 
 	warn(_("no shell"));
 
 	exit(EXIT_SUCCESS);
 }
 
-static void output_version(void)
-{
-	static const char *features[] = {
-#ifdef DEBUGGING
-		"debug",
-#endif
-		NULL
-	};
-	unsigned int i;
-
-	printf( _("%s from %s"), program_invocation_short_name, PACKAGE_STRING);
-	fputs(" (", stdout);
-	for (i = 0; features[i]; i++) {
-		if (0 < i)
-			fputs(", ", stdout);
-		printf("%s", features[i]);
-	}
-	fputs(")\n", stdout);
-}
-
 /* Parse command-line arguments. */
-static void parse_args(int argc, char **argv, struct nlogin_context *op)
+static void parse_args(int argc, char **argv)
 {
 	int c;
 
@@ -931,33 +867,27 @@ static void parse_args(int argc, char **argv, struct nlogin_context *op)
 		HELP_OPTION,
 	};
 	const struct option longopts[] = {
-		{  "version",	     no_argument,	     NULL,  'v'  },
+		{  "version",	  	 no_argument,	     NULL,  'v'  },
 		{  "help",	         no_argument,	     NULL,  'h'  },
 		{ NULL, 0, NULL, 0 }
 	};
 
-	while ((c = getopt_long(argc, argv,
-			   "hv", longopts,
-				NULL)) != -1) {
+	while ((c = getopt_long(argc, argv,  "hv", longopts, NULL)) != -1) {
 		switch (c) {
 		case 'v':
-			output_version();
-			exit(EXIT_SUCCESS);
 		case 'h':
+                case '?':
 			usage();
 		default:
 			errtryhelp(EXIT_FAILURE);
 		}
 	}
 
-	debug("after getopt loop\n");
-
-
 	debug("exiting parseargs\n");
 }
 
 /* Update our utmp entry. */
-static void update_utmp(struct nlogin_context *op)
+static void update_utmp(struct ng_context *op)
 {
 	struct utmpx ut;
 	time_t t;
@@ -1012,32 +942,21 @@ static void update_utmp(struct nlogin_context *op)
 	updwtmpx(_PATH_WTMP, &ut);
 }
 
-/* Set up tty as stdin, stdout & stderr. */
-static void open_tty(char *tty, struct termios *tp, struct nlogin_context *op)
+static inline void setup_stdin(char *tty)
 {
-	const pid_t pid = getpid();
-	int closed = 0;
-        int serial;
         int fd;
 	pid_t tid;
 	gid_t gid = 0;
+	const pid_t pid = getpid();
 	struct stat st;
 
-	/* Set up new standard input, unless we are given an already opened port. */
- 
 	/* Open the tty as standard input. */
 	if ((fd = open(tty, O_RDWR|O_NOCTTY|O_NONBLOCK, 0)) < 0)
 		log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
 
-	/*
-	 * There is always a race between this reset and the call to
-	 * vhangup() that s.o. can use to get access to your tty.
-	 * Linux login(1) will change tty permissions. Use root owner and group
-	 * with permission -rw------- for the period between getty and login.
-	 */
 	if (fchown(fd, 0, gid) || fchmod(fd, (gid ? 0620 : 0600))) {
 		if (errno == EROFS)
-			log_warn("%s: %m", tty);
+			warn("%s: %m", tty);
 		else
 			log_err("%s: %m", tty);
 	}
@@ -1052,45 +971,50 @@ static void open_tty(char *tty, struct termios *tp, struct nlogin_context *op)
 
 	if (((tid = tcgetsid(fd)) < 0) || (pid != tid)) {
 		if (ioctl(fd, TIOCSCTTY, 1) == -1)
-			log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
+			warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
 	}
 
 	close(STDIN_FILENO);
-	errno = 0;
-
 	close(fd);
+	errno = 0;
 
 	debug("open(2)\n");
 	if (open(tty, O_RDWR|O_NOCTTY|O_NONBLOCK, 0) != 0)
 		log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
 
+}
+
+
+/* Set up tty as stdin, stdout & stderr. */
+static void open_tty(char *tty, struct termios *tp, struct ng_context *op)
+{
+	const pid_t pid = getpid();
+        int serial;
+	pid_t tid;
+
+	/* Set up new standard input, unless we are given an already opened port. */
+        setup_stdin(tty); 
+
 	if (((tid = tcgetsid(STDIN_FILENO)) < 0) || (pid != tid)) {
 		if (ioctl(STDIN_FILENO, TIOCSCTTY, 1) == -1)
-			log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
+			warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
 	}
-
-
-	/*
-	 * Standard input should already be connected to an open port. Make
-	 * sure it is open for read/write.
-	 */
 
 	if ((fcntl(STDIN_FILENO, F_GETFL, 0) & O_RDWR) != O_RDWR)
 		log_err(_("%s: not open for read/write"), tty);
 
 
 	if (tcsetpgrp(STDIN_FILENO, pid))
-		log_warn(_("/dev/%s: cannot set process group: %m"), tty);
+		warn(_("/dev/%s: cannot set process group: %m"), tty);
+        
 
 	/* Get rid of the present outputs. */
-	if (!closed) {
-		close(STDOUT_FILENO);
-		close(STDERR_FILENO);
-		errno = 0;
-	}
+	close(STDOUT_FILENO);
+	close(STDERR_FILENO);
+	errno = 0;
 
 	/* Set up standard output and standard error file descriptors. */
-	debug("duping\n");
+	debug("duping stdin to fd:1 and fd:2\n");
 
 	/* set up stdout and stderr */
 	if (dup(STDIN_FILENO) != 1 || dup(STDIN_FILENO) != 2)
@@ -1128,11 +1052,9 @@ static void termio_clear(int fd)
 }
 
 /* Initialize termios settings. */
-static void termio_init(struct nlogin_context *op, struct termios *tp)
+static void termio_init(struct ng_context *op, struct termios *tp)
 {
 	if (op->flags & F_VCONSOLE) {
-		setlocale(LC_CTYPE, "POSIX");
-		//op->flags &= ~F_UTF8; VIJO -> FIXME
 		reset_vc(op, tp);
 
 		termio_clear(STDOUT_FILENO);
@@ -1144,7 +1066,7 @@ static void termio_init(struct nlogin_context *op, struct termios *tp)
 }
 
 /* Reset virtual console on stdin to its defaults */
-static void reset_vc(const struct nlogin_context *op, struct termios *tp)
+static void reset_vc(const struct ng_context *op, struct termios *tp)
 {
 	int fl = 0;
 
@@ -1154,7 +1076,7 @@ static void reset_vc(const struct nlogin_context *op, struct termios *tp)
 	reset_virtual_console(tp, fl);
 
 	if (tcsetattr(STDIN_FILENO, TCSADRAIN, tp))
-		log_warn(_("setting terminal attributes failed: %m"));
+		warn(_("setting terminal attributes failed: %m"));
 
 	/* Go to blocking input even in local mode. */
 	fcntl(STDIN_FILENO, F_SETFL,
@@ -1167,24 +1089,13 @@ static void __attribute__((__noreturn__)) usage(void)
 	FILE *out = stdout;
 
 	fputs(USAGE_HEADER, out);
-	fprintf(out, _(" %1$s [options] <line> [<baud_rate>,...] [<termtype>]\n"
-			   " %1$s [options] <baud_rate>,... <line> [<termtype>]\n"), program_invocation_short_name);
-
-	fputs(USAGE_SEPARATOR, out);
-	fputs(_("Open a terminal and set its mode.\n"), out);
+	fprintf(out, _(" %1$s <Script to start> \n"), program_invocation_short_name);
 
 	fputs(USAGE_OPTIONS, out);
-
-	printf(USAGE_MAN_TAIL("bangetty(8)"));
 
 	exit(EXIT_SUCCESS);
 }
 
-/*
- * Helper function reports errors to console or syslog.
- * Will be used by log_err() and log_warn() therefore
- * it takes a format as well as va_list.
- */
 static void exit_slowly(int code)
 {
 	/* Be kind to init(8). */
@@ -1192,50 +1103,34 @@ static void exit_slowly(int code)
 	exit(code);
 }
 
+static void dolog(int priority, const char *fmt, va_list ap)
+{
+	char buf[BUFSIZ];
+	char *bp;
+
+	buf[0] = '\0';
+	bp = buf;
+	vsnprintf(bp, sizeof(buf)-strlen(buf), fmt, ap);
+
+	openlog(program_invocation_short_name, LOG_PID, LOG_AUTHPRIV);
+	syslog(priority, "%s", buf);
+	closelog();
+}
+
 static void log_err(const char *fmt, ...)
 {
 	va_list ap;
 
 	va_start(ap, fmt);
-	//dolog(LOG_ERR, fmt, ap);
+	dolog(LOG_ERR, fmt, ap);
 	va_end(ap);
 
 	exit_slowly(EXIT_FAILURE);
 }
 
-static void log_warn(const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	//dolog(LOG_WARNING, fmt, ap);
-	va_end(ap);
-}
-
-int main(int argc, char **argv)
-{
-	struct chardata chardata;		/* will be set by get_logname() */
-	struct termios termios;			/* terminal mode bits */
-	struct nlogin_context options = {
-		.tty    = "/dev/tty1"		/* default tty line */
-	};
-	struct sigaction sa, sa_hup, sa_quit, sa_int;
-	sigset_t set;
-	login_ui_t *lui;
-
-	setlocale(LC_ALL, "");
-	bindtextdomain(PACKAGE, LOCALEDIR);
-	textdomain(PACKAGE);
-
-	/* In case vhangup(2) has to called */
-	sa.sa_handler = SIG_IGN;
-	sa.sa_flags = SA_RESTART;
-	sigemptyset (&sa.sa_mask);
-	sigaction(SIGHUP, &sa, &sa_hup);
-	sigaction(SIGQUIT, &sa, &sa_quit);
-	sigaction(SIGINT, &sa, &sa_int);
-
 #ifdef DEBUGGING
+void debug_init(int argc, char **argv)
+{
 	dbf = fopen(DEBUG_OUTPUT, "w");
 	for (int i = 1; i < argc; i++) {
 		if (i > 1)
@@ -1243,52 +1138,46 @@ int main(int argc, char **argv)
 		debug(argv[i]);
 	}
 	debug("\n");
+}
+#endif
+
+int main(int argc, char **argv)
+{
+	struct ng_context cxt = {
+		.tty    = "/dev/tty1",		/* default tty line */
+		.tty_mode = TTY_MODE,		  /* tty chmod() */
+		.pid = getpid(),		  /* PID */
+                .startsh = 0,
+	};
+	login_ui_t *lui;
+
+	setlocale(LC_ALL, "");
+	setlocale(LC_CTYPE, "POSIX");
+	bindtextdomain(PACKAGE, LOCALEDIR);
+	textdomain(PACKAGE);
+
+#ifdef DEBUGGING
+	debug_init(argc, argv);
 #endif				/* DEBUGGING */
 
 	/* Parse command-line arguments. */
-	parse_args(argc, argv, &options);
+	parse_args(argc, argv);
+
+        init_in_ctx(&cxt);
 
 	/* Update the utmp file before login */
-	update_utmp(&options);
+	update_utmp(&cxt);
 
-	debug("calling open_tty\n");
-
-	/* Open the tty as standard { input, output, error }. */
-	open_tty(options.tty, &termios, &options);
-
-	/* Unmask SIGHUP if inherited */
-	sigemptyset(&set);
-	sigaddset(&set, SIGHUP);
-	sigprocmask(SIG_UNBLOCK, &set, NULL);
-	sigaction(SIGHUP, &sa_hup, NULL);
-
-	tcsetpgrp(STDIN_FILENO, getpid());
-
-	/* Initialize the termios settings (raw mode, eight-bit, blocking i/o). */
-	debug("calling termio_init\n");
-	termio_init(&options, &termios);
-
-	if (options.flags & F_VCONSOLE)
-		/* Go to blocking mode unless -L is specified, this change
-		 * affects stdout, stdin and stderr as all the file descriptors
-		 * are created by dup().   */
-		fcntl(STDOUT_FILENO, F_SETFL,
-			  fcntl(STDOUT_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
-
-	INIT_CHARDATA(&chardata);
-
-	sigaction(SIGQUIT, &sa_quit, NULL);
-	sigaction(SIGINT, &sa_int, NULL);
-
-	lui = setup_login_screen();
+	lui = setup_login_screen(&cxt);
 	run_login_loop(lui);
 	teardown_login_screen(lui);
     debug("Tore down UI screen, next login_now()\n");
 
 	/* Also updates utmp */
-	login_now(argc, argv);
+	login_now(&cxt, argc, argv);
 #ifdef DEBUGGING
 	if (close_stream(dbf) != 0)
 		log_err("write failed: %s", DEBUG_OUTPUT);
 #endif
 }
+

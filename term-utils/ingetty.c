@@ -63,13 +63,13 @@
 
 #define	TTYGRPNAME	     	"tty"	/* name of group to own ttys */
 #define VCS_PATH_MAX		  64
-#define PRG_NAME           "ingetty"
+#define PRG_NAME        "ingetty"
 
 /*
  * Main control struct
  */
 struct in_context {
-	mode_t		tty_mode;  /* chmod() mode */
+	mode_t		    tty_mode;  /* chmod() mode */
 	struct passwd  *pwd;	   /* user info */
 	char	       *pwdbuf;	   /* pwd strings */
 	pid_t	        pid;
@@ -110,7 +110,7 @@ void debug_init(int argc, char **argv);
 
 typedef struct in_ui_s {
 	WINDOW  *bodywin;
-        WINDOW  *borderwin;
+    WINDOW  *borderwin;
 } in_ui_t;
 
 in_ui_t *setup_first_screen(struct in_context *cxt);
@@ -217,6 +217,7 @@ int run_ui_loop(in_ui_t *lui)
 			stop = 1;
 			break;
 		default:
+		    break;
 			//mvwprintw(lui->bodywin,4, 9, "Key %x is pressed", ch);
 		}
 		wrefresh(lui->bodywin);
