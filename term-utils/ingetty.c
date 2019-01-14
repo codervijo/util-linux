@@ -53,7 +53,7 @@
 
 
 #define SYSV_STYLE
-#define DEBUGGING 1
+#define DEBUGGING 0
 
 #ifdef USE_TTY_GROUP
 # define TTY_MODE 0620
@@ -94,7 +94,7 @@ static void log_err(const char *, ...) __attribute__((__noreturn__))
 #ifdef DEBUGGING
 # include "closestream.h"
 # ifndef DEBUG_OUTPUT
-#  define DEBUG_OUTPUT "/dev/tty10"
+#  define DEBUG_OUTPUT "/dev/tty5"
 # endif
 # define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
 FILE *dbf;
@@ -882,6 +882,7 @@ static void __attribute__((__noreturn__)) usage(void)
 
 	fputs(USAGE_HEADER, out);
 	fprintf(out, _(" %1$s <Script to start> \n"), program_invocation_short_name);
+        fprintf(out, "\nStart ncurses based getty for install\n");
 
 	fputs(USAGE_OPTIONS, out);
 
